@@ -1,0 +1,11 @@
+# 編譯產物
+.build/
+*.app/
+*.dSYM/
+
+# macOS
+.DS_Store
+
+# 探針／暫存
+*.o
+*.swiftmodule
