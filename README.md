@@ -26,6 +26,39 @@ Builds with **Xcode Command Line Tools only** — no Xcode needed: `./build.sh`
 
 一個原生的 macOS 番茄鐘（SwiftUI）。
 
+## 安裝
+
+只要三步，**全程不會跳任何安全警告**——自己編譯出來的 App 不會被系統隔離。
+
+1. 裝 Xcode Command Line Tools（如果還沒有）。開「終端機」貼上：
+
+   ```bash
+   xcode-select --install
+   ```
+
+   會跳出安裝視窗，照指示裝完即可（約 1–2 GB，要一點時間）。不需要完整版 Xcode。
+
+2. 下載並編譯：
+
+   ```bash
+   git clone https://github.com/kalovee/pomodoro-mac.git && cd pomodoro-mac && ./build.sh
+   ```
+
+3. 搬到應用程式資料夾並打開：
+
+   ```bash
+   mkdir -p ~/Applications && mv 番茄鐘.app ~/Applications/ && open ~/Applications/番茄鐘.app
+   ```
+
+需要 macOS 14 以上（Info.plist 宣告的下限；實際只在 macOS 26 與 27 上測試過）。
+
+> **為什麼不直接提供 .app 下載？**
+> 這個 App 是 ad-hoc 簽章，沒有 Apple 的 Developer ID，也沒有經過公證。
+> 透過 AirDrop、雲端或 email 傳過去的檔案會被標上隔離屬性，Gatekeeper 會擋下來，
+> 收到的人得自己去「系統設定 → 隱私權與安全性」手動放行。
+> 要做到下載就能開、零警告，需要 Apple Developer Program（年費 99 美元）
+> 簽發的 Developer ID 憑證加上公證流程。自己編譯完全沒有這個問題。
+
 ## 功能
 
 - **刻度錶盤**：60 格鐘面刻度，走過的上色，末端一顆指針點平滑移動
@@ -40,6 +73,8 @@ Builds with **Xcode Command Line Tools only** — no Xcode needed: `./build.sh`
 - **縮小時閒置變半透明**：滑鼠不在上面就淡到 42%，移過去才恢復，讀書時不干擾
 - **時間到自動接下一段**（可開關）
 - 任務標籤：輸入正在做什麼，完成後存進紀錄
+- **中途結束也能記**：讀到一半想收了，按「結束並記下 N 分鐘」就會把**實際專注的時間**
+  寫進紀錄再進入休息。暫停的時間不會被算進去
 - 今日完成番茄數與專注總時數，**從紀錄推導**（不另外存一份，所以讀書過午夜也不會累積到隔天）
 - 完成紀錄**按日期分組**，每天有小計；今天／昨天用相對說法，更早的標月日與星期
 - **時間到的提醒**（這一版重做過）：
@@ -67,6 +102,7 @@ Builds with **Xcode Command Line Tools only** — no Xcode needed: `./build.sh`
 | 設定 | 右下角齒輪 |
 | 停止提醒 | 點一下圓盤，或右鍵選單的「停止提醒」 |
 | 提前結束休息 | 遮罩上的「跳過休息」 |
+| 記下中途的進度 | 按鈕下方的「結束並記下 N 分鐘」（累積滿 1 分鐘才出現）、右鍵選單，或 ⌘⇧L |
 | 只收起遮罩（休息繼續） | 點遮罩任意處 |
 | 切換時間組合 | ⌘1 = 25/5，⌘2 = 30/10，⌘3 = 50/10，⌘4 = 90/20（App 在前景時） |
 | **全域熱鍵**（焦點在別的 App 也有效） | ⌃⌥空白鍵 開始／暫停、⌃⌥R 重設、⌃⌥S 跳過 |
@@ -138,6 +174,16 @@ Builds with **Xcode Command Line Tools only** — no Xcode needed: `./build.sh`
 > 改動 `Dial` 或計時器發佈頻率之前，先跑一次 CPU 量測（把畫面放進一個
 > `.statusBar` 層級的視窗，用 `getrusage` 量跑動 vs 暫停的差距）。
 > 這三個問題從程式碼上都看不出來，只有量了才知道。
+
+## 「跳過」和「結束並記錄」的差別
+
+兩個動作**刻意分開**，語意才不會混在一起：
+
+- **跳過**＝這段不算。不寫任何紀錄，輪數也不推進。
+- **結束並記錄**＝這段算，只是提早收。寫入實際專注的分鐘數、推進輪數，然後進入休息。
+
+實際專注時間是 `total - remaining` 算出來的。`remaining` 只在計時中減少，
+所以中間暫停多久都不會被算進去。
 
 ## 提醒脈動的條件
 
@@ -245,3 +291,7 @@ App 內合成白／粉／棕噪音是做得到的（零音檔），但那就不�
 | `Tools/MakeIcon.swift` | 產生 App 圖示 |
 
 設定與紀錄存在 `UserDefaults`（bundle id `local.pomodoro.timer`）。
+
+## 授權
+
+MIT，詳見 [LICENSE](LICENSE)。

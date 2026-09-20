@@ -350,6 +350,46 @@ final class PomodoroModel: ObservableObject {
         }
     }
 
+    // MARK: 記錄進度
+
+    /// 這一段已經專注了幾分鐘。
+    ///
+    /// `remaining` 只在計時中減少，所以 `total - remaining` 就是實際專注的時間——
+    /// 中間暫停多久都不會被算進去。
+    var elapsedMinutes: Int {
+        max(0, Int(((total - remaining) / 60).rounded()))
+    }
+
+    /// 有沒有東西可以記。專注段、而且至少滿一分鐘。
+    var canLogProgress: Bool {
+        phase == .work && elapsedMinutes >= 1
+    }
+
+    /// 提前結束這一段，但把已經專注的時間記進紀錄，然後進入休息。
+    ///
+    /// 跟 skip() 的差別就在這裡：skip 是「這段不算」，這個是「這段算，只是提早收」。
+    /// 兩個動作分開，語意才不會混在一起。
+    func logProgressAndBreak() {
+        guard canLogProgress else { return }
+        let minutes = elapsedMinutes
+        let label = task.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        clearAlert()
+        stopTicker()
+        record(minutes: minutes, task: label)
+        advance(countAsDone: true)
+    }
+
+    private func record(minutes: Int, task label: String) {
+        history.insert(
+            Session(finishedAt: Date(),
+                    task: label.isEmpty ? "未命名" : label,
+                    minutes: minutes),
+            at: 0)
+        if history.count > 200 { history.removeLast(history.count - 200) }
+        saveHistory()
+    }
+
     // MARK: 提醒
 
     /// 使用者表示「我看到了」。
@@ -428,13 +468,7 @@ final class PomodoroModel: ObservableObject {
         let label = task.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if finished == .work {
-            history.insert(
-                Session(finishedAt: Date(),
-                        task: label.isEmpty ? "未命名" : label,
-                        minutes: prefs.workMin),
-                at: 0)
-            if history.count > 200 { history.removeLast(history.count - 200) }
-            saveHistory()
+            record(minutes: prefs.workMin, task: label)
         }
 
         advance(countAsDone: true)

@@ -7,6 +7,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let panel: PanelController
     private var timingMenu: NSMenu?
     private var toggleItem: NSMenuItem?
+    private var logItem: NSMenuItem?
 
     init(panel: PanelController) {
         self.panel = panel
@@ -64,6 +65,11 @@ final class MenuController: NSObject, NSMenuDelegate {
         skip.target = self
         menu.addItem(skip)
 
+        logItem = NSMenuItem(title: "結束並記錄進度", action: #selector(logProgress(_:)), keyEquivalent: "l")
+        logItem?.keyEquivalentModifierMask = [.command, .shift]
+        logItem?.target = self
+        menu.addItem(logItem!)
+
         menu.addItem(.separator())
 
         for (i, preset) in Preset.all.enumerated() {
@@ -82,6 +88,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     @objc func toggleTimer(_ sender: NSMenuItem) { panel.model.toggle() }
     @objc func resetPhase(_ sender: NSMenuItem) { panel.model.reset() }
     @objc func skipPhase(_ sender: NSMenuItem) { panel.model.skip() }
+    @objc func logProgress(_ sender: NSMenuItem) { panel.model.logProgressAndBreak() }
 
     @objc func applyPreset(_ sender: NSMenuItem) {
         guard Preset.all.indices.contains(sender.tag) else { return }
@@ -93,6 +100,9 @@ final class MenuController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === timingMenu else { return }
         toggleItem?.title = panel.model.running ? "暫停" : "開始"
+        let can = panel.model.canLogProgress
+        logItem?.isEnabled = can
+        logItem?.title = can ? "結束並記下 \(panel.model.elapsedMinutes) 分鐘" : "結束並記錄進度"
 
         let active = panel.prefs.activePreset
         // 只看時間組合那幾項。用 action 判斷而不是 tag——

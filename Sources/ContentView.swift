@@ -57,6 +57,7 @@ private struct FullView: View {
             dial.padding(.top, 2)
             taskField.padding(.top, 18)
             controls.padding(.top, 14)
+            logProgress
             Spacer(minLength: 12)
             Rectangle().fill(Theme.hairline).frame(height: 1)
             footer.padding(.top, 12)
@@ -171,6 +172,25 @@ private struct FullView: View {
             // ⌘↩ 交給選單列處理：縮小模式沒有這顆按鈕，
             // 放在選單才是兩種模式都有效，也不會兩邊搶同一組鍵。
             circleButton("forward.end.fill", help: "跳過這一段") { model.skip() }
+        }
+    }
+
+    /// 只有真的累積到一分鐘以上才出現。
+    /// 放在按鈕下方本來就空著的那塊，不必為它挪版面。
+    @ViewBuilder
+    private var logProgress: some View {
+        if model.canLogProgress {
+            Button { model.logProgressAndBreak() } label: {
+                Text("結束並記下 \(model.elapsedMinutes) 分鐘")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(tint.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+            .help("把已經專注的時間記進紀錄，然後進入休息")
+            .padding(.top, 12)
         }
     }
 
@@ -303,6 +323,9 @@ private struct CompactView: View {
             }
             Button(model.running ? "暫停" : "開始") { model.toggle() }
             Button("重設這一段") { model.reset() }
+            if model.canLogProgress {
+                Button("結束並記下 \(model.elapsedMinutes) 分鐘") { model.logProgressAndBreak() }
+            }
             Divider()
             // 讀書時番茄鐘是縮小的，右鍵是最順手的切換入口
             Menu("時間長度") {
