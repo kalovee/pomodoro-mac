@@ -317,6 +317,8 @@ struct HistoryView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, 70)
             } else {
+                HistoryStats()
+                Rectangle().fill(Theme.hairline).frame(height: 1)
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(model.historyByDay) { day in
                         HStack(alignment: .firstTextBaseline) {
@@ -362,11 +364,126 @@ struct HistoryView: View {
         }
     }
 
-    /// 日期已經是分組的標題了，每一列只要時間
-    private func clock(_ date: Date) -> String {
+    /// 日期已經是分組的標題了，每一列只要時間。
+    /// 格式器共用一個：DateFormatter 建起來不便宜，原本每一列都 new 一個。
+    private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
-        return f.string(from: date)
+        return f
+    }()
+
+    private func clock(_ date: Date) -> String {
+        Self.timeFormatter.string(from: date)
+    }
+}
+
+/// 紀錄頁上方的統計：三個數字、最近 7 天的長條、最近 7 天的任務排行。
+///
+/// 長條圖用普通的圓角矩形自己排，不引入 Swift Charts——
+/// 這個專案只靠 Command Line Tools 編譯，少依賴一個框架就少一個變數。
+private struct HistoryStats: View {
+    @EnvironmentObject var model: PomodoroModel
+
+    private static let barArea: CGFloat = 64
+
+    /// 「一」「二」……今天另外寫「今天」
+    private static let weekdayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant")
+        f.dateFormat = "EEEEE"
+        return f
+    }()
+
+    var body: some View {
+        let days = model.lastSevenDays
+        let peak = max(1, days.map(\.minutes).max() ?? 1)
+        let tasks = model.topTasks
+        let accent = Theme.accent(.work)
+
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                figure(Self.hours(model.weekMinutes), "本週專注")
+                figure("\(model.streakDays) 天", "連續專注")
+                figure("\(model.todayCount) 個", "今天完成")
+            }
+
+            HStack(alignment: .bottom, spacing: 6) {
+                ForEach(days) { d in
+                    let isToday = Calendar.current.isDateInToday(d.day)
+                    VStack(spacing: 4) {
+                        Text(d.minutes > 0 ? "\(d.minutes)" : " ")
+                            .font(.system(size: 9.5))
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.muted)
+                        RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                            .fill(isToday ? accent : Theme.muted.opacity(d.minutes > 0 ? 0.4 : 0.15))
+                            .frame(height: max(3, Self.barArea * CGFloat(d.minutes) / CGFloat(peak)))
+                        Text(isToday ? "今天" : Self.weekdayFormatter.string(from: d.day))
+                            .font(.system(size: 10, weight: isToday ? .semibold : .regular))
+                            .foregroundStyle(isToday ? Theme.ink : Theme.muted)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .help("\(d.count) 個 · \(Self.duration(d.minutes))")
+                }
+            }
+            .frame(height: Self.barArea + 34, alignment: .bottom)
+
+            if !tasks.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("最近 7 天的任務")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                    ForEach(tasks) { t in
+                        HStack(spacing: 8) {
+                            Text(t.task)
+                                .font(Theme.caption)
+                                .foregroundStyle(Theme.ink)
+                                .lineLimit(1)
+                                .frame(width: 84, alignment: .leading)
+                            GeometryReader { geo in
+                                Capsule()
+                                    .fill(accent.opacity(0.55))
+                                    .frame(width: max(4, geo.size.width * CGFloat(t.minutes)
+                                                       / CGFloat(max(1, tasks[0].minutes))))
+                            }
+                            .frame(height: 5)
+                            Text(Self.duration(t.minutes))
+                                .font(Theme.caption)
+                                .monospacedDigit()
+                                .foregroundStyle(Theme.muted)
+                                .frame(width: 78, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.bottom, 14)
+    }
+
+    private func figure(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(Theme.caption)
+                .foregroundStyle(Theme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 大數字用：375 → 「6.3 小時」。三欄並排，「6 小時 15 分」塞不下
+    static func hours(_ minutes: Int) -> String {
+        minutes < 60 ? "\(minutes) 分" : String(format: "%.1f 小時", Double(minutes) / 60)
+    }
+
+    /// 90 → 「1 小時 30 分」；不滿一小時就寫分鐘
+    static func duration(_ minutes: Int) -> String {
+        if minutes < 60 { return "\(minutes) 分" }
+        return minutes % 60 == 0 ? "\(minutes / 60) 小時" : "\(minutes / 60) 小時 \(minutes % 60) 分"
     }
 }
 

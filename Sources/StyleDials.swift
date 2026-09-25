@@ -139,7 +139,36 @@ struct PulseOutline: View {
 
 // MARK: - 經典刻度
 
-/// 原本的錶盤，原封不動搬過來。也是其他風格的對照組。
+/// 刻度內側的淡色扇形＝還沒走到的時間。
+///
+/// 參考 Time Timer 那片會隨時間消失的紅色圓盤：刻度要數才讀得出來，
+/// 一片面積一眼就知道還剩多少。顏色壓得很淡，數字壓在上面還是清楚。
+private struct TimerWash: View {
+    let progress: Double
+    let tint: Color
+    let diameter: CGFloat
+
+    var body: some View {
+        Canvas { ctx, sz in
+            let center = CGPoint(x: sz.width / 2, y: sz.height / 2)
+            let r = diameter / 2 * 0.86
+            ctx.fill(sector(center: center, radius: r, from: progress), with: .color(tint.opacity(0.09)))
+            ctx.stroke(Path(ellipseIn: circleRect(center, r)),
+                       with: .color(Theme.hairline.opacity(0.8)), lineWidth: 0.75)
+            // 扇形的起邊：從圓心拉到目前位置的一條細線，像 Time Timer 圓盤的邊緣
+            if progress > 0.001 && progress < 0.999 {
+                let a = -Double.pi / 2 + 2 * .pi * progress
+                var edge = Path()
+                edge.move(to: center)
+                edge.addLine(to: CGPoint(x: center.x + r * cos(a), y: center.y + r * sin(a)))
+                ctx.stroke(edge, with: .color(tint.opacity(0.35)), lineWidth: 1)
+            }
+        }
+        .frame(width: diameter, height: diameter)
+    }
+}
+
+/// 60 格刻度加上 Time Timer 式的剩餘扇形。也是其他風格的對照組。
 private struct ClassicDial: View {
     let c: DialContext
     let size: CGSize
@@ -147,6 +176,7 @@ private struct ClassicDial: View {
     var body: some View {
         if c.isCompact {
             ZStack {
+                TimerWash(progress: c.progress, tint: c.tint, diameter: size.width - 18)
                 Dial(progress: c.progress, tint: c.tint, diameter: size.width - 18)
                 VStack(spacing: 5) {
                     Text(c.clock)
@@ -165,6 +195,7 @@ private struct ClassicDial: View {
             }
         } else {
             ZStack {
+                TimerWash(progress: c.progress, tint: c.tint, diameter: size.width)
                 Dial(progress: c.progress, tint: c.tint, diameter: size.width)
                 VStack(spacing: 7) {
                     Text(c.eyebrow)
@@ -245,9 +276,27 @@ private func pie(center: CGPoint, radius: CGFloat, fraction: Double) -> Path {
     return p
 }
 
+/// 從 from 走到整圈的扇形（從正上方順時針量），也就是「還沒走到」的那一塊
+private func sector(center: CGPoint, radius: CGFloat, from start: Double) -> Path {
+    var p = Path()
+    let fraction = 1 - min(1, max(0, start))
+    guard fraction > 0.001 else { return p }
+    p.move(to: center)
+    let steps = max(2, Int(96 * fraction))
+    for i in 0...steps {
+        let a = -Double.pi / 2 + 2 * .pi * (start + fraction * Double(i) / Double(steps))
+        p.addLine(to: CGPoint(x: center.x + radius * cos(a), y: center.y + radius * sin(a)))
+    }
+    p.closeSubpath()
+    return p
+}
+
 // MARK: - 像素 8-bit
 
 /// 掌機的四階綠。全部畫在一個 Canvas 裡——一個像素一個 view 的話會是幾百個 view。
+///
+/// 參考早期掌機的液晶：整片螢幕有淡淡的點陣格線，數字下面一條 RPG 式的 HP 條，
+/// 階段圖示站在 HP 條左邊。外圈 60 格保留，跟經典刻度同一套讀法。
 private struct PixelDial: View {
     let c: DialContext
     let size: CGSize
@@ -275,6 +324,21 @@ private struct PixelDial: View {
                 let cell = (w - 2 * margin) / 16
                 let block = cell * 0.74
 
+                // 液晶的點陣格線：半格一條，淡到只看得出質感
+                var grid = Path()
+                let pitch = cell / 2
+                var gx = margin
+                while gx <= w - margin + 0.1 {
+                    grid.addRect(CGRect(x: gx, y: margin, width: 0.5, height: h - 2 * margin))
+                    gx += pitch
+                }
+                var gy = margin
+                while gy <= h - margin + 0.1 {
+                    grid.addRect(CGRect(x: margin, y: gy, width: w - 2 * margin, height: 0.5))
+                    gy += pitch
+                }
+                ctx.fill(grid, with: .color(Self.darkest.opacity(0.06)))
+
                 // 外圈：剩下的亮、走過的暗
                 let elapsed = Int((c.progress * 60).rounded())
                 var lit = Path(), dim = Path()
@@ -298,13 +362,31 @@ private struct PixelDial: View {
                                  at: CGPoint(x: floor((w - textW) / 2), y: ty),
                                  px: px, color: Self.darkest)
 
-                // 階段小圖：專注是番茄、休息是咖啡杯（固定配色的風格不改色，用圖示區分）
-                let ipx = max(1, floor(cell * 0.55))
+                // 數字下面一排：階段圖示＋HP 條。
+                // 專注是番茄、休息是咖啡杯（固定配色的風格不改色，用圖示區分）
+                let ipx = max(1, floor(cell * 0.5))
+                let rowY = floor(ty + 5 * px + px * 1.4)
+                let barW = floor(inner * 0.52)
+                let barH = 6 * ipx
+                let rowW = 7 * ipx + 2 * ipx + barW
+                let rowX = floor((w - rowW) / 2)
                 PixelGlyphs.drawIcon(c.phase.isBreak ? PixelGlyphs.cup : PixelGlyphs.tomato,
-                                     in: ctx,
-                                     at: CGPoint(x: floor((w - 7 * ipx) / 2),
-                                                 y: floor(ty + 5 * px + px * 1.4)),
+                                     in: ctx, at: CGPoint(x: rowX, y: rowY),
                                      px: ipx, dark: Self.darkest, mid: Self.dark)
+
+                // HP 條：外框、底、10 格，剩多少亮多少
+                let bar = CGRect(x: rowX + 9 * ipx, y: rowY, width: barW, height: barH)
+                ctx.fill(Path(bar), with: .color(Self.darkest))
+                ctx.fill(Path(bar.insetBy(dx: ipx, dy: ipx)), with: .color(Self.light))
+                let slots = 10
+                let hpLit = c.remaining > 0 ? Int(ceil(c.remaining * Double(slots))) : 0
+                let slotW = (barW - 3 * ipx) / CGFloat(slots)
+                var hp = Path()
+                for i in 0..<hpLit {
+                    hp.addRect(CGRect(x: floor(bar.minX + 2 * ipx + CGFloat(i) * slotW), y: bar.minY + 2 * ipx,
+                                      width: max(1, floor(slotW) - ipx), height: barH - 4 * ipx))
+                }
+                ctx.fill(hp, with: .color(Self.dark))
             }
             if c.alerting {
                 Text(c.eyebrow)
@@ -344,13 +426,22 @@ private struct FlipCard: View {
     let height: CGFloat
     /// 只有分鐘那張會翻
     let flips: Bool
+    /// 卡片右下角的小字，像實體翻頁鐘印在卡片上的「分」「秒」
+    var label: String? = nil
 
-    private static let card = Color(hex: 0x2C2C2E)
-    private static let cardTop = Color(hex: 0x38383A)
+    /// 上半比下半亮一點，像光從上面打下來；各自再帶一點漸層
+    private static let topHi = Color(hex: 0x3C3C3F)
+    private static let topLo = Color(hex: 0x323235)
+    private static let botHi = Color(hex: 0x2A2A2D)
+    private static let botLo = Color(hex: 0x222225)
     private static let ink = Color(hex: 0xF2F2F2)
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: height * 0.12, style: .continuous)
         ZStack {
+            // 卡片底下的厚度：往下錯開一點的深色卡，比 .shadow 便宜而且不會糊
+            shape.fill(Color.black.opacity(0.55))
+                .offset(y: height * 0.035)
             face(text)
                 // 分鐘變的時候換 id 觸發翻頁；秒數用固定 id，就地換字不翻
                 .id(flips ? text : "static")
@@ -364,11 +455,12 @@ private struct FlipCard: View {
 
     private func face(_ t: String) -> some View {
         let shape = RoundedRectangle(cornerRadius: height * 0.12, style: .continuous)
+        let hinge = max(1.5, height * 0.02)
         return ZStack {
-            shape.fill(Self.card)
             VStack(spacing: 0) {
-                Self.cardTop.frame(height: height / 2)
-                Color.clear
+                LinearGradient(colors: [Self.topHi, Self.topLo], startPoint: .top, endPoint: .bottom)
+                    .frame(height: height / 2)
+                LinearGradient(colors: [Self.botHi, Self.botLo], startPoint: .top, endPoint: .bottom)
             }
             Text(t)
                 .font(.system(size: height * 0.72, weight: .bold).monospacedDigit())
@@ -376,8 +468,19 @@ private struct FlipCard: View {
                 .minimumScaleFactor(0.45)
                 .lineLimit(1)
                 .padding(.horizontal, width * 0.06)
-            // 中間的轉軸縫
-            Color.black.opacity(0.75).frame(height: max(1.5, height * 0.018))
+            // 中間的轉軸縫：一條黑線，下緣一道細亮邊，才看得出是兩片
+            VStack(spacing: 0) {
+                Color.black.opacity(0.8).frame(height: hinge)
+                Color.white.opacity(0.08).frame(height: 0.75)
+            }
+            if let label {
+                Text(label)
+                    .font(.system(size: max(7, height * 0.11), weight: .semibold))
+                    .foregroundStyle(Self.ink.opacity(0.35))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, width * 0.08)
+                    .padding(.bottom, height * 0.07)
+            }
             HStack {
                 Capsule().fill(Color.black.opacity(0.6)).frame(width: width * 0.035, height: height * 0.16)
                 Spacer()
@@ -386,6 +489,7 @@ private struct FlipCard: View {
         }
         .frame(width: width, height: height)
         .clipShape(shape)
+        .overlay(shape.stroke(Color.white.opacity(0.06), lineWidth: 0.75))
     }
 }
 
@@ -413,9 +517,9 @@ private struct FlipDial: View {
                     .position(x: w / 2, y: h * 0.10)
             }
 
-            FlipCard(text: c.minutes, width: cardW, height: cardH, flips: true)
+            FlipCard(text: c.minutes, width: cardW, height: cardH, flips: true, label: "分")
                 .position(x: pad + cardW / 2, y: cardsTop + cardH / 2)
-            FlipCard(text: c.seconds, width: cardW, height: cardH, flips: false)
+            FlipCard(text: c.seconds, width: cardW, height: cardH, flips: false, label: "秒")
                 .position(x: w - pad - cardW / 2, y: cardsTop + cardH / 2)
             VStack(spacing: cardH * 0.22) {
                 Circle().fill(Self.ink.opacity(0.55)).frame(width: 4, height: 4)
@@ -452,6 +556,9 @@ private struct FlipDial: View {
 // MARK: - LCD 電子錶
 
 /// 七段數字自己畫。沒亮的段淡淡留著——那是 LCD 的靈魂。
+///
+/// 參考經典數位錶（刻意不用任何品牌字樣）：錶殼兩側各兩顆按鍵、液晶上緣印著模式標籤、
+/// 右上角一組小七段顯示輪數、底下的分段條兩端加括號，像電池格。
 private struct LCDDial: View {
     let c: DialContext
     let size: CGSize
@@ -465,6 +572,16 @@ private struct LCDDial: View {
         let scr = CGRect(x: inset, y: inset, width: w - 2 * inset, height: h - 2 * inset)
 
         Canvas { ctx, _ in
+            // 錶殼兩側的按鍵
+            var keys = Path()
+            for fy in [0.32, 0.68] {
+                for x in [CGFloat(0.5), w - 4] {
+                    keys.addRoundedRect(in: CGRect(x: x, y: h * fy - 6, width: 3.5, height: 12),
+                                        cornerSize: CGSize(width: 1.5, height: 1.5))
+                }
+            }
+            ctx.fill(keys, with: .color(Self.ink.opacity(0.22)))
+
             ctx.fill(Path(roundedRect: scr, cornerRadius: 8), with: .color(Self.screen))
             ctx.stroke(Path(roundedRect: scr, cornerRadius: 8), with: .color(Self.ink.opacity(0.2)), lineWidth: 1)
 
@@ -481,6 +598,38 @@ private struct LCDDial: View {
             if c.alerting {
                 ctx.draw(Text(c.eyebrow).font(legendFont).foregroundColor(Self.ink),
                          at: CGPoint(x: scr.maxX - (c.isCompact ? 26 : 32), y: scr.minY + (c.isCompact ? 9 : 12)))
+            } else {
+                // 右上角的小七段：完成輪數／一輪幾個，沒亮的段一樣淡淡留著
+                let sh: CGFloat = c.isCompact ? 8 : 10
+                let sw = sh * 0.55
+                let st = max(1, sw * 0.2)
+                let sgap = sw * 0.35
+                let slash = sw * 0.8
+                let left = String(c.roundInCycle), right = String(c.rounds)
+                let count = left.count + right.count
+                let smallW = CGFloat(count) * sw + CGFloat(count - 1) * sgap + slash + sgap
+                var sx = scr.maxX - 9 - smallW
+                let sy = scr.minY + (c.isCompact ? 9 : 12) - sh / 2
+                var sLit = Path(), sGhost = Path()
+                func small(_ text: String) {
+                    for ch in text {
+                        let on = PixelGlyphs.segments[ch] ?? []
+                        for (name, seg) in PixelGlyphs.segmentPaths(in: CGRect(x: sx, y: sy, width: sw, height: sh),
+                                                                    thickness: st) {
+                            if on.contains(name) { sLit.addPath(seg) } else { sGhost.addPath(seg) }
+                        }
+                        sx += sw + sgap
+                    }
+                }
+                small(left)
+                var cut = Path()
+                cut.move(to: CGPoint(x: sx + slash, y: sy))
+                cut.addLine(to: CGPoint(x: sx, y: sy + sh))
+                sLit.addPath(cut.strokedPath(StrokeStyle(lineWidth: st)))
+                sx += slash + sgap
+                small(right)
+                ctx.fill(sGhost, with: .color(Self.ink.opacity(0.07)))
+                ctx.fill(sLit, with: .color(Self.ink.opacity(0.85)))
             }
 
             // 七段數字
@@ -533,6 +682,17 @@ private struct LCDDial: View {
             }
             ctx.fill(off, with: .color(Self.ink.opacity(0.08)))
             ctx.fill(on, with: .color(Self.ink.opacity(0.85)))
+
+            // 分段條兩端的括號
+            var brackets = Path()
+            for side in [-1.0, 1.0] {
+                let bx = scr.midX + CGFloat(side) * (barW / 2 + 3)
+                brackets.addRect(CGRect(x: bx - 0.6, y: barY - 4, width: 1.2, height: 8))
+                let tipX = side < 0 ? bx : bx - 2.5
+                brackets.addRect(CGRect(x: tipX, y: barY - 4, width: 2.5, height: 1.2))
+                brackets.addRect(CGRect(x: tipX, y: barY + 2.8, width: 2.5, height: 1.2))
+            }
+            ctx.fill(brackets, with: .color(Self.ink.opacity(0.6)))
         }
         .frame(width: w, height: h)
     }
@@ -916,7 +1076,8 @@ private struct WaterDial: View {
 
 // MARK: - 包浩斯
 
-/// 紅圓裡的扇形＝剩下的時間；藍方、黃條、黑線是構成。
+/// 參考 Herbert Bayer 等包浩斯海報的構成：紅圓是視覺焦點，扇形＝剩下的時間；
+/// 右上四片四分之一圓拼成一個圓，完成幾輪就填幾片藍；底下一條黑色粗帶承載數字。
 private struct BauhausDial: View {
     let c: DialContext
     let size: CGSize
@@ -925,42 +1086,75 @@ private struct BauhausDial: View {
     private static let yellow = Color(hex: 0xF2B51C)
     private static let blue = Color(hex: 0x1F4E9C)
     private static let ink = Color(hex: 0x1A1A1A)
+    private static let paper = Color(hex: 0xF1EADB)
 
     var body: some View {
         let w = size.width, h = size.height
+        let band = CGRect(x: w * 0.06, y: h * 0.68, width: w * 0.88, height: h * 0.24)
 
         ZStack {
             Canvas { ctx, _ in
-                let cc = CGPoint(x: w * 0.36, y: h * 0.36)
+                let line = max(1.2, w * 0.01)
+                let cc = CGPoint(x: w * 0.34, y: h * 0.34)
                 let r = w * 0.24
                 ctx.fill(pie(center: cc, radius: r, fraction: c.remaining), with: .color(Self.red))
-                ctx.stroke(Path(ellipseIn: circleRect(cc, r)), with: .color(Self.ink),
-                           lineWidth: max(1.2, w * 0.01))
-                ctx.fill(Path(CGRect(x: w * 0.66, y: h * 0.12, width: w * 0.20, height: w * 0.20)),
-                         with: .color(Self.blue))
-                ctx.fill(Path(CGRect(x: w * 0.66, y: h * 0.40, width: w * 0.24, height: h * 0.07)),
+                ctx.stroke(Path(ellipseIn: circleRect(cc, r)), with: .color(Self.ink), lineWidth: line)
+
+                // 輪數：四片四分之一圓，從左上順時針填。一輪不是 4 個的話按比例換算
+                let q = w * 0.13
+                let hub = CGPoint(x: w * 0.64 + q, y: h * 0.08 + q)
+                let done = c.rounds > 0
+                    ? min(4, Int((Double(min(c.roundInCycle, c.rounds)) / Double(c.rounds) * 4).rounded()))
+                    : 0
+                for i in 0..<4 {
+                    // 左上從 180° 開始，每片 90°（y 軸朝下，角度增加就是順時針）
+                    let a0 = Double.pi * (1 + 0.5 * Double(i))
+                    var wedge = Path()
+                    wedge.move(to: hub)
+                    for k in 0...16 {
+                        let a = a0 + Double.pi / 2 * Double(k) / 16
+                        wedge.addLine(to: CGPoint(x: hub.x + q * cos(a), y: hub.y + q * sin(a)))
+                    }
+                    wedge.closeSubpath()
+                    if i < done {
+                        ctx.fill(wedge, with: .color(Self.blue))
+                    } else {
+                        ctx.stroke(wedge, with: .color(Self.ink.opacity(0.55)), lineWidth: 1)
+                    }
+                }
+
+                ctx.fill(Path(CGRect(x: w * 0.64, y: h * 0.44, width: w * 0.28, height: h * 0.07)),
                          with: .color(Self.yellow))
-                ctx.fill(Path(CGRect(x: w * 0.10, y: h * 0.66, width: w * 0.80, height: max(2, h * 0.022))),
-                         with: .color(Self.ink))
-            }
-            HStack(spacing: w * 0.03) {
-                CellText(text: c.clock, font: .custom("Futura-Bold", size: w * 0.16),
-                         cell: w * 0.10, color: Self.ink)
-                // 固定配色的風格不改色，休息時多一顆藍點
+                ctx.fill(Path(band), with: .color(Self.ink))
+
+                // 固定配色的風格不改色，休息時黑帶上坐著一個藍色半圓。
+                // 放左邊：右邊那塊空位留給提醒文字（提醒時通常已經進入休息）
                 if c.phase.isBreak {
-                    Circle().fill(Self.blue).frame(width: w * 0.05, height: w * 0.05)
+                    let hc = CGPoint(x: band.minX + w * 0.12, y: band.minY)
+                    let hr = w * 0.065
+                    var dome = Path()
+                    dome.move(to: CGPoint(x: hc.x - hr, y: hc.y))
+                    for k in 0...24 {
+                        let a = Double.pi + Double.pi * Double(k) / 24
+                        dome.addLine(to: CGPoint(x: hc.x + hr * cos(a), y: hc.y + hr * sin(a)))
+                    }
+                    dome.closeSubpath()
+                    ctx.fill(dome, with: .color(Self.blue))
                 }
             }
-            .frame(width: w * 0.80, alignment: .leading)
-            .position(x: w / 2, y: h * 0.79)
 
-            // 靠右、塞在黃條和黑線之間的空位。放左邊會壓到紅圓。
+            CellText(text: c.clock, font: .custom("Futura-Bold", size: w * 0.16),
+                     cell: w * 0.10, color: Self.paper)
+                .frame(width: band.width - w * 0.08, alignment: .leading)
+                .position(x: band.midX, y: band.midY)
+
+            // 靠右、塞在黃條和黑帶之間的空位。放左邊會壓到紅圓。
             if c.alerting {
                 Text(c.eyebrow)
                     .font(.custom("Futura-Bold", size: max(9, w * 0.065)))
                     .foregroundStyle(Self.red)
                     .frame(width: w * 0.80, alignment: .trailing)
-                    .position(x: w / 2, y: h * 0.57)
+                    .position(x: w / 2, y: h * 0.59)
             }
         }
         .frame(width: w, height: h)
@@ -1091,7 +1285,8 @@ private struct StationHand: Shape {
     }
 }
 
-/// 白錶面、黑刻度、紅秒針。
+/// 白錶面、黑刻度、紅秒針。參考一般鐵路月台鐘和包浩斯系的牆鐘：
+/// 12／3／9 三個無襯線數字、外緣一條紅色細弧＝剩下的時間、數位時間收進錶面下方的小窗。
 /// 刻意不叫「瑞士鐵路鐘」、秒針也不做尖端紅色圓盤——那是 SBB 受保護的設計。
 private struct StationDial: View {
     let c: DialContext
@@ -1102,8 +1297,20 @@ private struct StationDial: View {
 
     var body: some View {
         let r = size.width / 2 - (c.isCompact ? 5 : 3)
+        // 紅弧畫在刻度外面、錶面邊緣裡面那一圈縫
+        let rim: CGFloat = c.isCompact ? 2.5 : 1.5
         ZStack {
             StationTicks(radius: r).fill(Self.ink)
+            Circle()
+                .trim(from: min(1, max(0, c.progress)), to: 1)
+                .stroke(Self.red, lineWidth: c.isCompact ? 1.8 : 1.2)
+                .rotationEffect(.degrees(-90))
+                .frame(width: 2 * (r + rim), height: 2 * (r + rim))
+
+            // 12、3、9。6 的位置留給數位小窗
+            numeral("12", at: 0, r: r)
+            numeral("3", at: 90, r: r)
+            numeral("9", at: 270, r: r)
 
             Group {
                 if c.alerting {
@@ -1115,8 +1322,14 @@ private struct StationDial: View {
             }
             .font(.custom("Helvetica-Bold", size: max(9, r * 0.13)))
             // 放在數字下面。提醒時時間是整分、兩根指針都指向正上方，放上面一定被蓋住。
-            .offset(y: r * 0.61)
+            .offset(y: r * 0.66)
 
+            RoundedRectangle(cornerRadius: r * 0.05, style: .continuous)
+                .fill(Self.ink.opacity(0.05))
+                .overlay(RoundedRectangle(cornerRadius: r * 0.05, style: .continuous)
+                    .stroke(Self.ink.opacity(0.18), lineWidth: 0.75))
+                .frame(width: r * 0.72, height: r * 0.27)
+                .offset(y: r * 0.40)
             CellText(text: c.clock, font: .custom("Helvetica-Bold", size: r * 0.19),
                      cell: r * 0.125, color: Self.ink)
                 .offset(y: r * 0.40)
@@ -1131,5 +1344,13 @@ private struct StationDial: View {
             Circle().fill(Self.ink).frame(width: r * 0.06, height: r * 0.06)
         }
         .frame(width: size.width, height: size.height)
+    }
+
+    private func numeral(_ label: String, at degrees: Double, r: CGFloat) -> some View {
+        let a = degrees * .pi / 180
+        return Text(label)
+            .font(.custom("Helvetica-Bold", size: r * 0.17))
+            .foregroundStyle(Self.ink)
+            .offset(x: r * 0.60 * CGFloat(sin(a)), y: -r * 0.60 * CGFloat(cos(a)))
     }
 }

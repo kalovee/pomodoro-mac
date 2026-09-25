@@ -26,16 +26,16 @@ enum DialStyle: String, CaseIterable, Identifiable {
 
     var note: String {
         switch self {
-        case .classic:   return "60 格刻度，走過的上色"
-        case .pixel:     return "8-bit 掌機的四階綠"
+        case .classic:   return "60 格刻度加上剩餘時間的扇形"
+        case .pixel:     return "8-bit 掌機的四階綠，附 HP 條"
         case .flip:      return "分鐘變的時候翻一頁"
-        case .lcd:       return "七段數字，沒亮的段淡淡留著"
+        case .lcd:       return "七段數字，右上角是輪數"
         case .hourglass: return "上面的沙就是剩下的時間"
         case .moon:      return "由滿月慢慢缺成新月"
         case .water:     return "兩道波浪，淹到的數字反白"
-        case .bauhaus:   return "紅黃藍的幾何構成"
+        case .bauhaus:   return "紅圓扇形，四分之一圓記輪數"
         case .minimal:   return "一道圓環，末端一顆圓鈕"
-        case .station:   return "黑色粗刻度配紅色秒針"
+        case .station:   return "紅弧是剩下的時間，紅秒針一秒一跳"
         }
     }
 
