@@ -63,6 +63,21 @@ struct DaySummary: Identifiable {
     }
 }
 
+/// 統計用：某一天的專注總量。長條圖一天一根，沒紀錄的日子也要有一根（高度 0）。
+struct DayTotal: Identifiable {
+    let day: Date
+    let minutes: Int
+    let count: Int
+    var id: Date { day }
+}
+
+/// 統計用：某個任務累積的分鐘數
+struct TaskTotal: Identifiable {
+    let task: String
+    let minutes: Int
+    var id: String { task }
+}
+
 // MARK: - 時間組合
 
 /// 常用的專注／休息組合。切換時四個欄位一起換，行為才可預期。
@@ -523,6 +538,65 @@ final class PomodoroModel: ObservableObject {
     var todayMinutes: Int {
         history.filter { Calendar.current.isDateInToday($0.finishedAt) }
                .reduce(0) { $0 + $1.minutes }
+    }
+
+    // MARK: 統計
+    //
+    // 跟 todayCount 一樣全部從紀錄推導，不另外存，就不會有跨日沒歸零、兩邊對不起來的問題。
+
+    /// 今天往回 7 天，舊的在前。沒有紀錄的日子補 0，長條圖才不會缺一格。
+    var lastSevenDays: [DayTotal] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let groups = Dictionary(grouping: history) { calendar.startOfDay(for: $0.finishedAt) }
+        return (0..<7).reversed().compactMap { back -> DayTotal? in
+            guard let day = calendar.date(byAdding: .day, value: -back, to: today) else { return nil }
+            let list = groups[day] ?? []
+            return DayTotal(day: day, minutes: list.reduce(0) { $0 + $1.minutes }, count: list.count)
+        }
+    }
+
+    /// 本週累積的專注分鐘數。一週從哪天開始跟著系統設定。
+    var weekMinutes: Int {
+        let calendar = Calendar.current
+        let now = Date()
+        return history
+            .filter { calendar.isDate($0.finishedAt, equalTo: now, toGranularity: .weekOfYear) }
+            .reduce(0) { $0 + $1.minutes }
+    }
+
+    /// 連續有專注紀錄的天數。
+    ///
+    /// 今天還沒有紀錄的話從昨天算起：早上打開紀錄頁看到連續天數歸零很洩氣，
+    /// 而今天其實還沒過完。
+    var streakDays: Int {
+        let calendar = Calendar.current
+        let days = Set(history.map { calendar.startOfDay(for: $0.finishedAt) })
+        var day = calendar.startOfDay(for: Date())
+        if !days.contains(day) {
+            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: day) else { return 0 }
+            day = yesterday
+        }
+        var streak = 0
+        while days.contains(day) {
+            streak += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { break }
+            day = previous
+        }
+        return streak
+    }
+
+    /// 最近 7 天花最多時間的任務，前 3 名。「未命名」不列——它不是一個任務。
+    var topTasks: [TaskTotal] {
+        guard let start = lastSevenDays.first?.day else { return [] }
+        var totals: [String: Int] = [:]
+        for s in history where s.finishedAt >= start && s.task != "未命名" {
+            totals[s.task, default: 0] += s.minutes
+        }
+        return totals
+            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+            .prefix(3)
+            .map { TaskTotal(task: $0.key, minutes: $0.value) }
     }
 
     // MARK: 設定變更時同步
