@@ -32,9 +32,9 @@ enum DialStyle: String, CaseIterable, Identifiable {
         case .lcd:       return "七段數字，沒亮的段淡淡留著"
         case .hourglass: return "上面的沙就是剩下的時間"
         case .moon:      return "由滿月慢慢缺成新月"
-        case .water:     return "水位就是剩下的時間"
+        case .water:     return "兩道波浪，淹到的數字反白"
         case .bauhaus:   return "紅黃藍的幾何構成"
-        case .minimal:   return "一條細環，沒有別的"
+        case .minimal:   return "一道圓環，末端一顆圓鈕"
         case .station:   return "黑色粗刻度配紅色秒針"
         }
     }
