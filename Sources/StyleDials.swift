@@ -540,61 +540,116 @@ private struct LCDDial: View {
 
 // MARK: - 沙漏
 
+/// 參考實體沙漏：上下木板加兩根側柱，玻璃是兩顆圓鼓的泡在細頸相接。
+/// 上面的沙面中間凹下去（沙從正中間漏走），下面的沙堆成圓錐——
+/// 平平的一條色塊看起來像進度條，不像沙。
 private struct HourglassDial: View {
     let c: DialContext
     let size: CGSize
 
+    /// 木框。深色模式調亮一點，不然會沉進背景
+    private static let wood = Theme.dyn(0x8C6D52, 0xA88B6E)
+
     var body: some View {
         let w = size.width, h = size.height
-        let glassW = w * 0.64
-        let glassH = h * (c.isCompact ? 0.64 : 0.68)
-        let glass = CGRect(x: (w - glassW) / 2, y: h * 0.06, width: glassW, height: glassH)
+        let glassW = w * 0.58
+        let glassH = h * (c.isCompact ? 0.66 : 0.70)
+        let box = CGRect(x: (w - glassW) / 2, y: h * 0.05, width: glassW, height: glassH)
 
         ZStack {
             Canvas { ctx, _ in
-                let cap = glassH * 0.045
-                let body = glass.insetBy(dx: 0, dy: cap)
-                let path = Self.glassPath(in: body)
-                ctx.fill(path, with: .color(Theme.fill.opacity(0.45)))
+                let plate = glassH * 0.04
+                let plateW = glassW * 1.26
+                let plateX = box.midX - plateW / 2
+                // 玻璃和木板之間留一點縫，玻璃才像是被夾住的
+                let body = box.insetBy(dx: glassW * 0.04, dy: plate + glassH * 0.012)
+                let glass = Self.glassPath(in: body)
+                let top = body.minY, neck = body.midY, bottom = body.maxY
+                let half = neck - top
 
-                // 沙只存在玻璃裡面
+                // 側柱畫在玻璃後面
+                let post = max(2, w * 0.022)
+                for x in [plateX + plateW * 0.07, plateX + plateW * 0.93 - post] {
+                    ctx.fill(Path(roundedRect: CGRect(x: x, y: box.minY, width: post, height: glassH),
+                                  cornerRadius: post / 2),
+                             with: .color(Self.wood.opacity(0.75)))
+                }
+
+                ctx.fill(glass, with: .color(Theme.fill.opacity(0.35)))
+
+                let sand = GraphicsContext.Shading.linearGradient(
+                    Gradient(colors: [c.tint.opacity(0.72), c.tint]),
+                    startPoint: CGPoint(x: 0, y: top), endPoint: CGPoint(x: 0, y: bottom))
+
+                // 上泡越靠頸部越窄，剩一點點沙也還有高度；下泡底部寬，一開始堆得慢。
+                // 用次方近似體積，比線性的高度更像真的沙。
+                let topFill = pow(c.remaining, 0.6)
+                let pileFill = 1 - pow(1 - c.progress, 0.6)
+                let flowing = c.running && c.remaining > 0.001 && c.remaining < 0.999
+
+                var peakY = bottom
                 ctx.drawLayer { layer in
-                    layer.clip(to: path)
-                    let top = body.minY, neck = body.midY, bottom = body.maxY
-                    // 上面的沙＝剩下的時間
-                    let topLevel = neck - (neck - top) * 0.86 * c.remaining
+                    layer.clip(to: glass)
+
+                    // 上面的沙＝剩下的時間，沙面中間凹下去
                     if c.remaining > 0.001 {
-                        layer.fill(Path(CGRect(x: body.minX, y: topLevel,
-                                               width: body.width, height: neck - topLevel)),
-                                   with: .color(c.tint))
+                        let level = neck - half * 0.82 * topFill
+                        let dip = flowing ? min(half * 0.10, (neck - level) * 0.5) : 0
+                        var p = Path()
+                        p.move(to: CGPoint(x: body.minX, y: level))
+                        p.addQuadCurve(to: CGPoint(x: body.maxX, y: level),
+                                       control: CGPoint(x: body.midX, y: level + 2 * dip))
+                        p.addLine(to: CGPoint(x: body.maxX, y: neck))
+                        p.addLine(to: CGPoint(x: body.minX, y: neck))
+                        p.closeSubpath()
+                        layer.fill(p, with: sand)
                     }
-                    // 下面堆起來的沙＝已經過去的時間，頂端微微隆起
-                    let botLevel = bottom - (bottom - neck) * 0.86 * c.progress
+
+                    // 下面的沙＝已經過去的時間，堆成圓錐
                     if c.progress > 0.001 {
-                        var mound = Path()
-                        mound.move(to: CGPoint(x: body.minX, y: bottom))
-                        mound.addLine(to: CGPoint(x: body.minX, y: botLevel + 3))
-                        mound.addQuadCurve(to: CGPoint(x: body.maxX, y: botLevel + 3),
-                                           control: CGPoint(x: body.midX, y: botLevel - 4))
-                        mound.addLine(to: CGPoint(x: body.maxX, y: bottom))
-                        mound.closeSubpath()
-                        layer.fill(mound, with: .color(c.tint))
+                        let base = bottom - half * 0.82 * pileFill
+                        let cone = min(half * 0.22, (bottom - base) + half * 0.08)
+                        peakY = max(neck + 2, base - cone / 2)
+                        let shoulder = base + cone / 2
+                        var p = Path()
+                        p.move(to: CGPoint(x: body.minX, y: bottom))
+                        p.addLine(to: CGPoint(x: body.minX, y: shoulder))
+                        p.addCurve(to: CGPoint(x: body.midX, y: peakY),
+                                   control1: CGPoint(x: body.minX + body.width * 0.28, y: shoulder),
+                                   control2: CGPoint(x: body.midX - body.width * 0.14, y: peakY))
+                        p.addCurve(to: CGPoint(x: body.maxX, y: shoulder),
+                                   control1: CGPoint(x: body.midX + body.width * 0.14, y: peakY),
+                                   control2: CGPoint(x: body.maxX - body.width * 0.28, y: shoulder))
+                        p.addLine(to: CGPoint(x: body.maxX, y: bottom))
+                        p.closeSubpath()
+                        layer.fill(p, with: sand)
                     }
-                    // 頸部的細沙線，靜止不動（不做粒子）
-                    if c.running && c.remaining > 0.001 && c.remaining < 0.999 {
+
+                    // 頸部落下的細沙線，只在計時中出現；靜止不動（不做粒子）
+                    if flowing {
                         layer.fill(Path(CGRect(x: body.midX - 0.6, y: neck,
-                                               width: 1.2, height: max(0, botLevel - neck))),
+                                               width: 1.2, height: max(0, peakY - neck))),
                                    with: .color(c.tint))
                     }
                 }
-                ctx.stroke(path, with: .color(Theme.ink.opacity(0.35)), lineWidth: 1.5)
 
-                // 上下木蓋
-                for y in [glass.minY, glass.maxY - cap] {
-                    ctx.fill(Path(roundedRect: CGRect(x: glass.minX - glassW * 0.08, y: y,
-                                                      width: glassW * 1.16, height: cap),
-                                  cornerRadius: cap / 2),
-                             with: .color(Theme.muted.opacity(0.6)))
+                // 玻璃反光：兩顆泡左上各一道細白弧
+                for (y0, y1) in [(top + half * 0.16, top + half * 0.60),
+                                 (neck + half * 0.40, bottom - half * 0.16)] {
+                    var hl = Path()
+                    hl.move(to: CGPoint(x: body.minX + body.width * 0.17, y: y0))
+                    hl.addQuadCurve(to: CGPoint(x: body.minX + body.width * 0.17, y: y1),
+                                    control: CGPoint(x: body.minX + body.width * 0.05, y: (y0 + y1) / 2))
+                    ctx.stroke(hl, with: .color(.white.opacity(0.4)),
+                               style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                }
+                ctx.stroke(glass, with: .color(Theme.ink.opacity(0.28)), lineWidth: 1.2)
+
+                // 上下木板
+                for y in [box.minY, box.maxY - plate] {
+                    ctx.fill(Path(roundedRect: CGRect(x: plateX, y: y, width: plateW, height: plate),
+                                  cornerRadius: plate / 2),
+                             with: .color(Self.wood))
                 }
             }
 
@@ -606,31 +661,42 @@ private struct HourglassDial: View {
                     .lineLimit(1)
                 StatusLine(c: c, dot: 3.5)
             }
-            .position(x: w / 2, y: glass.maxY + (h - glass.maxY) / 2)
+            .position(x: w / 2, y: box.maxY + (h - box.maxY) / 2)
         }
         .frame(width: w, height: h)
     }
 
-    /// 兩個玻璃泡在頸部相接
+    /// 兩顆圓鼓的玻璃泡：口比肚子窄一點，肚子鼓出去再收進細頸。
+    /// 先算右半邊，左半邊左右鏡像。
     static func glassPath(in r: CGRect) -> Path {
-        let neck = r.width * 0.07
-        let ym = r.midY
+        let half = r.width / 2
+        let q = r.midY - r.minY
+        let lip = 0.76                // 泡口寬度（相對於最寬處）
+        let neck = 0.10               // 頸部寬度
+        func pt(_ sx: Double, _ y: CGFloat) -> CGPoint { CGPoint(x: r.midX + half * sx, y: y) }
+
         var p = Path()
-        p.move(to: CGPoint(x: r.minX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
-        p.addCurve(to: CGPoint(x: r.midX + neck, y: ym),
-                   control1: CGPoint(x: r.maxX, y: r.minY + (ym - r.minY) * 0.55),
-                   control2: CGPoint(x: r.midX + neck, y: ym - (ym - r.minY) * 0.25))
-        p.addCurve(to: CGPoint(x: r.maxX, y: r.maxY),
-                   control1: CGPoint(x: r.midX + neck, y: ym + (r.maxY - ym) * 0.25),
-                   control2: CGPoint(x: r.maxX, y: r.maxY - (r.maxY - ym) * 0.55))
-        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
-        p.addCurve(to: CGPoint(x: r.midX - neck, y: ym),
-                   control1: CGPoint(x: r.minX, y: r.maxY - (r.maxY - ym) * 0.55),
-                   control2: CGPoint(x: r.midX - neck, y: ym + (r.maxY - ym) * 0.25))
-        p.addCurve(to: CGPoint(x: r.minX, y: r.minY),
-                   control1: CGPoint(x: r.midX - neck, y: ym - (ym - r.minY) * 0.25),
-                   control2: CGPoint(x: r.minX, y: r.minY + (ym - r.minY) * 0.55))
+        p.move(to: pt(-lip, r.minY))
+        p.addLine(to: pt(lip, r.minY))
+        for s in [1.0, -1.0] {
+            // s = 1：右邊由上往下；s = -1：左邊由下往上
+            let y0 = s > 0 ? r.minY : r.maxY
+            let y1 = s > 0 ? r.maxY : r.minY
+            let d = s > 0 ? q : -q       // 往頸部的方向
+            p.addCurve(to: pt(s, y0 + d * 0.40),
+                       control1: pt(s * (lip + (1 - lip) * 0.7), y0),
+                       control2: pt(s, y0 + d * 0.12))
+            p.addCurve(to: pt(s * neck, r.midY),
+                       control1: pt(s, y0 + d * 0.78),
+                       control2: pt(s * neck, r.midY - d * 0.22))
+            p.addCurve(to: pt(s, y1 - d * 0.40),
+                       control1: pt(s * neck, r.midY + d * 0.22),
+                       control2: pt(s, y1 - d * 0.78))
+            p.addCurve(to: pt(s * lip, y1),
+                       control1: pt(s, y1 - d * 0.12),
+                       control2: pt(s * (lip + (1 - lip) * 0.7), y1))
+            if s > 0 { p.addLine(to: pt(-lip, r.maxY)) }
+        }
         p.closeSubpath()
         return p
     }
@@ -638,16 +704,28 @@ private struct HourglassDial: View {
 
 // MARK: - 月相
 
-/// 由滿月慢慢缺成新月：亮面＝剩下的時間。
+/// 參考機械錶的月相盤：深藍星空、帶暖色的月面，暗面留一點地球反照，
+/// 月海（深色斑塊）讓它看起來是月亮而不是一顆白圓。亮面＝剩下的時間，由滿月缺成新月。
 private struct MoonDial: View {
     let c: DialContext
     let size: CGSize
 
-    /// 星星位置（相對座標），刻意避開月亮
+    /// 星星位置（相對座標），刻意避開月亮。第三個值是半徑，大於 1 的畫成十字星芒。
     private static let stars: [(CGFloat, CGFloat, CGFloat)] = [
-        (0.20, 0.22, 1.1), (0.78, 0.18, 0.9), (0.85, 0.42, 1.2), (0.14, 0.50, 0.8),
+        (0.20, 0.22, 1.3), (0.78, 0.18, 0.9), (0.85, 0.42, 1.1), (0.14, 0.50, 0.8),
         (0.30, 0.10, 0.7), (0.24, 0.72, 0.9), (0.80, 0.68, 0.7), (0.53, 0.07, 0.8),
+        (0.68, 0.30, 0.6), (0.10, 0.34, 0.6),
     ]
+    /// 月海：中心（相對月心，以半徑為單位）和半徑
+    private static let maria: [(CGFloat, CGFloat, CGFloat)] = [
+        (-0.28, -0.22, 0.24), (0.14, -0.30, 0.17), (0.28, 0.06, 0.21),
+        (-0.08, 0.20, 0.15), (0.04, 0.48, 0.10), (-0.40, 0.36, 0.08),
+    ]
+
+    private static let starColor = Color(hex: 0xF3E6C2)
+    private static let moonLight = Color(hex: 0xFBF6E6)
+    private static let moonEdge = Color(hex: 0xE4D8B8)
+    private static let moonDark = Color(hex: 0x252C4D)
 
     var body: some View {
         let w = size.width, h = size.height
@@ -657,16 +735,52 @@ private struct MoonDial: View {
 
         ZStack {
             Canvas { ctx, _ in
+                // 天頂稍亮。半透明疊在底色上，提醒時的底色閃光才透得過來
+                ctx.fill(Path(CGRect(x: 0, y: 0, width: w, height: h)),
+                         with: .radialGradient(Gradient(colors: [.white.opacity(0.07), .clear]),
+                                               center: CGPoint(x: w / 2, y: h * 0.2),
+                                               startRadius: 0, endRadius: w * 0.7))
+
                 for (x, y, s) in Self.stars {
-                    ctx.fill(Path(ellipseIn: circleRect(CGPoint(x: w * x, y: h * y), s)),
-                             with: .color(.white.opacity(0.55)))
+                    let p = CGPoint(x: w * x, y: h * y)
+                    ctx.fill(Path(ellipseIn: circleRect(p, s)), with: .color(Self.starColor.opacity(0.7)))
+                    if s > 1 {
+                        var cross = Path()
+                        cross.move(to: CGPoint(x: p.x - s * 3, y: p.y))
+                        cross.addLine(to: CGPoint(x: p.x + s * 3, y: p.y))
+                        cross.move(to: CGPoint(x: p.x, y: p.y - s * 3))
+                        cross.addLine(to: CGPoint(x: p.x, y: p.y + s * 3))
+                        ctx.stroke(cross, with: .color(Self.starColor.opacity(0.35)), lineWidth: 0.6)
+                    }
                 }
-                ctx.fill(Path(ellipseIn: circleRect(center, r * 1.22)), with: .color(.white.opacity(0.05)))
-                ctx.fill(Path(ellipseIn: circleRect(center, r)), with: .color(Color(hex: 0x2A3150)))
+
+                // 光暈跟著亮面大小變淡
+                ctx.fill(Path(ellipseIn: circleRect(center, r * 1.7)),
+                         with: .radialGradient(Gradient(colors: [Self.moonLight.opacity(0.03 + 0.13 * c.remaining),
+                                                                 .clear]),
+                                               center: center, startRadius: r * 0.9, endRadius: r * 1.7))
+
+                // 暗面：地球反照，看得出整顆月亮的輪廓
+                let disk = Path(ellipseIn: circleRect(center, r))
+                ctx.fill(disk, with: .color(Self.moonDark))
+
                 let lit = Self.litPath(center: center, r: r, fraction: c.remaining)
-                ctx.fill(lit, with: .color(Color(hex: 0xF4F1E8)))
+                ctx.fill(lit, with: .radialGradient(Gradient(colors: [Self.moonLight, Self.moonEdge]),
+                                                    center: CGPoint(x: center.x - r * 0.3, y: center.y - r * 0.3),
+                                                    startRadius: 0, endRadius: r * 1.4))
                 // 月光只帶一點階段色，太多會變成粉紅色的月亮
-                ctx.fill(lit, with: .color(c.tint.opacity(0.12)))
+                ctx.fill(lit, with: .color(c.tint.opacity(0.10)))
+
+                // 月海：亮面上是淡灰斑，暗面上是更暗的斑，一次畫完
+                ctx.drawLayer { layer in
+                    layer.clip(to: disk)
+                    var m = Path()
+                    for (dx, dy, rr) in Self.maria {
+                        m.addEllipse(in: circleRect(CGPoint(x: center.x + dx * r, y: center.y + dy * r), rr * r))
+                    }
+                    layer.fill(m, with: .color(.black.opacity(0.09)))
+                }
+                ctx.stroke(disk, with: .color(.white.opacity(0.08)), lineWidth: 1)
             }
             VStack(spacing: 4) {
                 Text(c.clock)
@@ -704,14 +818,56 @@ private struct MoonDial: View {
 
 // MARK: - 水位
 
-/// 水位＝剩下的時間。水面是一段固定的淺弧，不做波浪。
+/// 一道正弦波的水面，底下填滿。
+///
+/// 波的相位由秒數決定：每秒跟著倒數挪一點，暫停時就停住。
+/// 不做連續的波浪動畫——這個視窗浮在全螢幕 App 上，一直重畫的代價太高。
+private struct WaveShape: Shape {
+    /// 水位（0…1，從底部算起）
+    let level: Double
+    let amplitude: CGFloat
+    /// 波長，相對於寬度
+    let wavelength: CGFloat
+    let phase: Double
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        guard level > 0.002 else { return p }
+        let y0 = rect.maxY - rect.height * CGFloat(level)
+        let steps = 48
+        for i in 0...steps {
+            let x = rect.width * CGFloat(i) / CGFloat(steps)
+            let angle = 2 * Double.pi * Double(x / (wavelength * rect.width)) + phase
+            let y = y0 + amplitude * CGFloat(sin(angle))
+            let pt = CGPoint(x: rect.minX + x, y: y)
+            if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+        }
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// 參考液體進度球：前後兩道錯開的波疊出水的深度，淹到的數字反白。
+/// 水位＝剩下的時間。
 private struct WaterDial: View {
     let c: DialContext
     let size: CGSize
 
+    /// 靜止的氣泡（相對座標、半徑），只畫在水面以下的
+    private static let bubbles: [(CGFloat, CGFloat, CGFloat)] = [
+        (0.30, 0.82, 2.2), (0.36, 0.72, 1.4), (0.68, 0.86, 1.8), (0.74, 0.62, 1.2), (0.58, 0.93, 1.3),
+    ]
+
     var body: some View {
         let w = size.width, h = size.height
-        let level = h * (1 - c.remaining)
+        // 水快滿或快乾時把波壓平，不然波峰會頂出圓外或在底部露出一條縫
+        let damp = CGFloat(min(1, c.remaining * 8, (1 - c.remaining) * 8))
+        let amp = (c.isCompact ? 3.5 : 4.5) * damp
+        let phase = Double(c.elapsedInMinute) * 0.9
+        let front = WaveShape(level: c.remaining, amplitude: amp, wavelength: 0.95, phase: phase)
+        let back = WaveShape(level: c.remaining, amplitude: amp * 0.8, wavelength: 0.8, phase: -phase * 0.7 + 2)
 
         ZStack {
             Canvas { ctx, _ in
@@ -720,29 +876,41 @@ private struct WaterDial: View {
                     ctx.fill(Path(CGRect(x: w * 0.13, y: h * f - 0.5, width: w * 0.08, height: 1)),
                              with: .color(Theme.muted.opacity(0.45)))
                 }
-                guard c.remaining > 0.002 else { return }
-                var surface = Path()
-                surface.move(to: CGPoint(x: 0, y: level))
-                surface.addQuadCurve(to: CGPoint(x: w, y: level), control: CGPoint(x: w / 2, y: level + 5))
-                var water = surface
-                water.addLine(to: CGPoint(x: w, y: h))
-                water.addLine(to: CGPoint(x: 0, y: h))
-                water.closeSubpath()
-                ctx.fill(water, with: .color(c.tint.opacity(0.26)))
-                ctx.stroke(surface, with: .color(c.tint.opacity(0.65)), lineWidth: 1.5)
             }
-            VStack(spacing: c.isCompact ? 5 : 7) {
-                if !c.isCompact {
-                    Text(c.eyebrow).font(Theme.eyebrow).tracking(2).foregroundStyle(c.tint)
+            back.fill(c.tint.opacity(0.28))
+            front.fill(LinearGradient(colors: [c.tint.opacity(0.72), c.tint.opacity(0.95)],
+                                      startPoint: .top, endPoint: .bottom))
+            Canvas { ctx, _ in
+                let surface = h * (1 - c.remaining) + amp + 4
+                var p = Path()
+                for (x, y, r) in Self.bubbles where h * y - r > surface {
+                    p.addEllipse(in: circleRect(CGPoint(x: w * x, y: h * y), r))
                 }
-                Text(c.clock)
-                    .font(Theme.clock(c.isCompact ? 30 : 42))
-                    .foregroundStyle(Theme.ink)
-                StatusLine(c: c, dot: c.isCompact ? 4 : 5)
+                ctx.stroke(p, with: .color(.white.opacity(0.45)), lineWidth: 0.8)
             }
-            .offset(y: c.hovering ? -10 : 0)
+
+            // 同一組字畫兩次：水上是墨色，水下的部分用波形遮罩換成白色
+            readout(ink: Theme.ink, accent: c.tint)
+                .frame(width: w, height: h)
+            readout(ink: .white, accent: .white.opacity(0.9))
+                .frame(width: w, height: h)
+                .mask { front }
         }
         .frame(width: w, height: h)
+    }
+
+    private func readout(ink: Color, accent: Color) -> some View {
+        VStack(spacing: c.isCompact ? 5 : 7) {
+            if !c.isCompact {
+                Text(c.eyebrow).font(Theme.eyebrow).tracking(2).foregroundStyle(accent)
+            }
+            Text(c.clock)
+                .font(Theme.clock(c.isCompact ? 30 : 42))
+                .foregroundStyle(ink)
+            StatusLine(c: c, dot: c.isCompact ? 4 : 5, color: accent)
+        }
+        // offset 要在 frame／mask 之前：字往上挪，遮罩的水面不跟著挪
+        .offset(y: c.hovering ? -10 : 0)
     }
 }
 
@@ -801,34 +969,79 @@ private struct BauhausDial: View {
 
 // MARK: - 極簡環
 
+/// 12 個小點，放在環的內側當作時刻的暗示，一條路徑畫完
+private struct HourDots: Shape {
+    let radius: CGFloat
+    let dot: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        for i in 0..<12 {
+            let a = Double(i) / 12 * 2 * .pi
+            p.addEllipse(in: circleRect(CGPoint(x: rect.midX + radius * CGFloat(sin(a)),
+                                                y: rect.midY - radius * CGFloat(cos(a))), dot / 2))
+        }
+        return p
+    }
+}
+
+/// 參考 Apple Watch 的活動圓環：同色系的淡底軌、圓頭的粗弧，
+/// 弧的末端一顆帶陰影的圓鈕標出「現在在這裡」。數字只留分鐘大字，秒數縮小退後。
 private struct MinimalDial: View {
     let c: DialContext
     let size: CGSize
 
     var body: some View {
-        let d = c.isCompact ? size.width - 22 : size.width - 6
+        let d = c.isCompact ? size.width - 24 : size.width - 10
+        let line: CGFloat = c.isCompact ? 5 : 6
+        // 弧的末端：從正上方順時針，剩下多少就走到哪
+        let a = 2 * Double.pi * c.remaining
+        let knob = CGPoint(x: d / 2 * CGFloat(sin(a)), y: -d / 2 * CGFloat(cos(a)))
+
         ZStack {
-            Circle().stroke(Theme.hairline, lineWidth: 1.5).frame(width: d, height: d)
+            Circle().stroke(c.tint.opacity(0.13), lineWidth: line).frame(width: d, height: d)
+            HourDots(radius: d / 2 - line - (c.isCompact ? 5 : 7), dot: c.isCompact ? 1.6 : 2)
+                .fill(Theme.muted.opacity(0.35))
+                .frame(width: d, height: d)
             // 剩下多少：從正上方順時針，隨時間往回縮
             Circle()
                 .trim(from: 0, to: c.remaining)
-                .stroke(c.tint, style: StrokeStyle(lineWidth: c.isCompact ? 3 : 3.5, lineCap: .round))
+                .stroke(c.tint, style: StrokeStyle(lineWidth: line, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .frame(width: d, height: d)
-            VStack(spacing: c.isCompact ? 4 : 8) {
+            if c.remaining > 0.002 {
+                Circle()
+                    .fill(Theme.surface)
+                    .frame(width: line * 0.55, height: line * 0.55)
+                    .frame(width: line * 1.5, height: line * 1.5)
+                    .background(Circle().fill(c.tint))
+                    .shadow(color: .black.opacity(0.28), radius: 1.5, y: 0.5)
+                    .offset(x: knob.x, y: knob.y)
+            }
+
+            VStack(spacing: c.isCompact ? 2 : 6) {
                 if !c.isCompact {
                     Text(c.eyebrow).font(Theme.eyebrow).tracking(2).foregroundStyle(c.tint)
                 }
-                Text(c.clock)
-                    .font(.system(size: c.isCompact ? 32 : 50, weight: .light, design: .rounded)
-                        .monospacedDigit())
-                    .foregroundStyle(Theme.ink)
+                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                    Text(c.minutes)
+                        .font(.system(size: c.isCompact ? 38 : 58, weight: .thin, design: .rounded)
+                            .monospacedDigit())
+                        .foregroundStyle(Theme.ink)
+                    Text(":" + c.seconds)
+                        .font(.system(size: c.isCompact ? 15 : 20, weight: .regular, design: .rounded)
+                            .monospacedDigit())
+                        .foregroundStyle(Theme.muted)
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 if !c.isCompact {
                     StatusLine(c: c)
                 } else if c.alerting {
                     Text(c.eyebrow).font(Theme.eyebrow).tracking(1.5).foregroundStyle(c.tint)
                 }
             }
+            .frame(maxWidth: d - 2 * line - 20)
             .offset(y: c.hovering ? -8 : 0)
         }
         .frame(width: size.width, height: size.height)
