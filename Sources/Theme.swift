@@ -5,7 +5,7 @@ import AppKit
 /// 強調色只用在錶盤與主要按鈕，其餘一律灰階，讓層次不會被拉平。
 enum Theme {
 
-    private static func dyn(_ light: UInt32, _ dark: UInt32) -> Color {
+    static func dyn(_ light: UInt32, _ dark: UInt32) -> Color {
         Color(nsColor: nsDyn(light, dark))
     }
 

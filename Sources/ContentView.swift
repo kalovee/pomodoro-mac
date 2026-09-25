@@ -12,6 +12,11 @@ final class ViewState: ObservableObject {
     @Published var hovering = false
 }
 
+extension Notification.Name {
+    /// 縮小模式的錶盤要不要淡出。object 是 Bool。
+    static let dialFadeChanged = Notification.Name("dialFadeChanged")
+}
+
 /// 提醒時錶盤該顯示的字。放在這裡是因為完整模式和縮小模式都要用。
 func alertEyebrow(for finished: Phase?) -> String {
     finished == .work ? "休息時間" : "該專注了"
@@ -96,31 +101,25 @@ private struct FullView: View {
     }
 
     private var dial: some View {
-        ZStack {
+        let style = prefs.dialStyle
+        let panel = style.fullSize
+        return ZStack {
+            if style.showsPanelInFull {
+                style.silhouette
+                    .fill(style.surface)
+                    .overlay(style.silhouette.stroke(style.outline, lineWidth: 1))
+                    .frame(width: panel.width, height: panel.height)
+            }
             if model.alerting {
-                PulseRing(tint: tint, breath: model.breath ? 1 : 0, diameter: 214)
+                PulseOutline(shape: style.silhouette, tint: tint, breath: model.breath ? 1 : 0)
+                    .frame(width: panel.width + 18, height: panel.height + 18)
             }
-
-            Dial(progress: model.progress, tint: tint, diameter: 196)
-
-            VStack(spacing: 7) {
-                Text(model.alerting ? alertEyebrow(for: model.alertFinished) : model.phase.title)
-                    .font(Theme.eyebrow)
-                    .tracking(2)
-                    .foregroundStyle(tint)
-
-                Text(model.clock)
-                    .font(Theme.clock(46))
-                    .foregroundStyle(Theme.ink)
-
-                if model.alerting {
-                    Text("點一下停止提醒")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.muted)
-                } else {
-                    RoundDots(done: model.roundInCycle, total: prefs.roundsPerLong, tint: tint)
-                }
-            }
+            StyledDial(style: style,
+                       context: DialContext(model: model, prefs: prefs, isCompact: false),
+                       size: panel)
+                .frame(width: panel.width, height: panel.height)
+                // 有面板的風格內容不能超出面板——水位的水是整塊矩形，靠這裡切成圓的
+                .clipShape(style.showsPanelInFull ? style.silhouette : AnyShape(Rectangle()))
         }
         .frame(height: 222)
         .animation(.easeInOut(duration: Metrics.pulse), value: model.breath)
@@ -261,57 +260,64 @@ private struct CompactView: View {
     @StateObject private var ui = ViewState()
 
     private var tint: Color { Theme.accent(model.phase) }
-    private let size: CGFloat = Metrics.compact.width
+    private var style: DialStyle { prefs.dialStyle }
+    /// 視窗尺寸——形狀跟著風格走
+    private var size: CGSize { style.compactSize }
+    /// 輪廓尺寸：視窗往內縮一圈，讓輪廓的抗鋸齒邊不會被視窗邊界切平
+    private var panel: CGSize {
+        CGSize(width: size.width - 2 * DialStyle.inset, height: size.height - 2 * DialStyle.inset)
+    }
 
     var body: some View {
         ZStack {
-            Circle()
-                .fill(Theme.surface)
-                .overlay(Circle().fill(tint.opacity(alertWash)))
-                .overlay(Circle().stroke(Theme.hairline, lineWidth: 1))
-                .shadow(color: .black.opacity(0.22), radius: 12, y: 4)
-                .padding(6)
+            // 輪廓本身不縮放、不改透明度。系統陰影是依輪廓的透明度算一次就快取起來的，
+            // 輪廓一縮一放，陰影跟不上，邊緣會露出一圈——等於換個形式把框框請回來。
+            // 脈動、提醒色、內容都疊在它上面各自動。
+            //
+            // 陰影交給系統畫（PanelController 的 hasShadow）。原本這裡的 .shadow(radius: 12, y: 4)
+            // 要伸出約 16pt，但圓盤離視窗邊緣只有 6pt，被外層 .clipped() 和視窗邊界硬切，
+            // 切口就是圓盤後面那圈方框。
+            style.silhouette
+                .fill(style.surface)
+                .overlay(style.silhouette.stroke(style.outline, lineWidth: 1))
 
-            if model.alerting {
-                PulseRing(tint: tint, breath: model.breath ? 1 : 0, diameter: size - 12)
-            }
-
-            Dial(progress: model.progress, tint: tint, diameter: size - 30)
-
-            VStack(spacing: 5) {
-                Text(model.clock)
-                    .font(Theme.clock(30))
-                    .foregroundStyle(Theme.ink)
+            ZStack {
+                style.silhouette.fill(tint.opacity(alertWash))
                 if model.alerting {
-                    Text(alertEyebrow(for: model.alertFinished))
-                        .font(Theme.eyebrow)
-                        .tracking(1.5)
-                        .foregroundStyle(tint)
-                } else {
-                    RoundDots(done: model.roundInCycle, total: prefs.roundsPerLong,
-                              tint: tint, dot: 4)
+                    PulseOutline(shape: style.silhouette, tint: tint, breath: model.breath ? 1 : 0)
                 }
+                StyledDial(style: style,
+                           context: DialContext(model: model, prefs: prefs,
+                                                isCompact: true,
+                                                hovering: ui.hovering && !style.dimsOnHover),
+                           size: panel)
+                    .clipShape(style.silhouette)
+                    // 寬的、高的和指針式的風格沒有空位放按鈕，懸停時把錶面壓暗、按鈕疊在正中間
+                    .opacity(ui.hovering && style.dimsOnHover ? 0.22 : 1)
             }
-            .offset(y: ui.hovering ? -10 : 0)
+            // 只內縮不放大：外層有 .clipped()，放大的部分會被切在視窗邊緣
+            .scaleEffect(model.alerting && model.breath ? 0.96 : 1)
 
             // 滑鼠移上去才出現控制項，平常只剩計時器本身
             HStack(spacing: 8) {
                 compactButton(model.running ? "pause.fill" : "play.fill") { model.toggle() }
                 compactButton("arrow.up.left.and.arrow.down.right") { prefs.compact = false }
             }
-            .offset(y: 40)
+            .offset(y: style.dimsOnHover ? 0 : panel.height * 0.26)
             .opacity(ui.hovering ? 1 : 0)
         }
-        // 只內縮不放大：外層有 .clipped()，放大的部分會被切在視窗邊緣
-        .scaleEffect(model.alerting && model.breath ? 0.96 : 1)
-        .frame(width: size, height: size)
-        .background(Color.clear)
-        // 讀書時不要太搶眼：沒有滑鼠在上面就淡下去，移過去才恢復。
-        // 但提醒中一律全亮——這是「一直漏看」的主要修法。
-        .opacity(model.alerting || ui.hovering || !prefs.idleFade ? 1 : 0.42)
+        .frame(width: panel.width, height: panel.height)
+        // 只有輪廓裡面算數：透明的角落點下去要能穿到後面的 App
+        .contentShape(style.silhouette)
+        .padding(DialStyle.inset)
+        .frame(width: size.width, height: size.height)
         .animation(.easeOut(duration: 0.18), value: ui.hovering)
         .animation(.easeInOut(duration: 0.28), value: model.phase)
         .animation(.easeInOut(duration: Metrics.pulse), value: model.breath)
+        // 淡出交給視窗的 alphaValue，不用 SwiftUI 的 opacity：系統陰影是快取的，
+        // 只把內容調淡的話，會變成很淡的錶盤配一圈全黑的陰影。alphaValue 會連陰影一起淡。
+        .onAppear { postFade() }
+        .onChange(of: isFaded) { postFade() }
         .onHover { ui.hovering = $0 }
         // 只在提醒中才吃點擊，平常拖曳圓盤的行為不受影響
         .onTapGesture { if model.alerting { model.acknowledge() } }
@@ -340,12 +346,31 @@ private struct CompactView: View {
                     }
                 }
             }
+            Menu("風格") {
+                ForEach(DialStyle.allCases) { style in
+                    Button {
+                        prefs.dialStyle = style
+                    } label: {
+                        Text(prefs.dialStyle == style ? "✓ \(style.label)" : style.label)
+                    }
+                }
+            }
             Divider()
             Button("放大") { prefs.compact = false }
             Button("取消浮動（顯示 Dock 圖示）") { prefs.alwaysOnTop = false }
             Divider()
             Button("結束番茄鐘") { NSApp.terminate(nil) }
         }
+    }
+
+    /// 讀書時不要太搶眼：沒有滑鼠在上面就淡下去，移過去才恢復。
+    /// 但提醒中一律全亮——這是「一直漏看」的主要修法。
+    private var isFaded: Bool {
+        !(model.alerting || ui.hovering || !prefs.idleFade)
+    }
+
+    private func postFade() {
+        NotificationCenter.default.post(name: .dialFadeChanged, object: isFaded)
     }
 
     private var alertWash: Double {

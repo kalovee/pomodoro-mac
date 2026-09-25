@@ -11,6 +11,10 @@ struct SettingsView: View {
 
     var body: some View {
         SheetFrame(title: "設定") {
+            group("風格") {
+                styleGallery
+            }
+
             group("時間長度") {
                 presetRow
                 row("專注", value: $prefs.workMin, range: 1...120, unit: "分鐘")
@@ -135,6 +139,42 @@ struct SettingsView: View {
                 .foregroundStyle(Theme.muted)
         }
         .padding(.bottom, 4)
+    }
+
+    /// 十個風格的縮圖牆。縮圖就是該風格縮小模式的實際樣子，縮放塞進格子裡。
+    private var styleGallery: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                      spacing: 10) {
+                ForEach(DialStyle.allCases) { style in
+                    let active = prefs.dialStyle == style
+                    Button { prefs.dialStyle = style } label: {
+                        VStack(spacing: 5) {
+                            StyleThumbnail(style: style, box: CGSize(width: 74, height: 60))
+                                .frame(width: 74, height: 60)
+                            Text(style.label)
+                                .font(.system(size: 10.5, weight: active ? .semibold : .regular))
+                                .foregroundStyle(active ? Theme.accent(model.phase) : Theme.muted)
+                                .lineLimit(1)
+                        }
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(active ? Theme.accent(model.phase).opacity(0.08) : Color.clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(active ? Theme.accent(model.phase) : Color.clear, lineWidth: 1.5)
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(style.note)
+                }
+            }
+            caption(prefs.dialStyle.note)
+        }
     }
 
     /// 鈴聲選擇 + 試聽。試聽走跟真實響鈴同一條路徑與同一個音量，

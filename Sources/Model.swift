@@ -132,6 +132,9 @@ final class Prefs: ObservableObject {
     @Published var ringCount: Int     { didSet { d.set(ringCount, forKey: "ringCount") } }
     @Published var ringGap: Int       { didSet { d.set(ringGap, forKey: "ringGap") } }
     @Published var globalHotkeys: Bool { didSet { d.set(globalHotkeys, forKey: "globalHotkeys") } }
+    @Published var dialStyle: DialStyle {
+        didSet { d.set(dialStyle.rawValue, forKey: "dialStyle") }
+    }
     @Published var overlayMode: OverlayMode {
         didSet { d.set(overlayMode.rawValue, forKey: "overlayMode") }
     }
@@ -146,6 +149,7 @@ final class Prefs: ObservableObject {
             "ringUntilAck": false, "ringCount": 5, "ringGap": 2,
             "overlayMode": OverlayMode.breakStart.rawValue,
             "globalHotkeys": true,
+            "dialStyle": DialStyle.classic.rawValue,
         ])
         workMin = d.integer(forKey: "workMin")
         shortMin = d.integer(forKey: "shortMin")
@@ -170,6 +174,7 @@ final class Prefs: ObservableObject {
         ringCount = d.integer(forKey: "ringCount")
         ringGap = d.integer(forKey: "ringGap")
         globalHotkeys = d.bool(forKey: "globalHotkeys")
+        dialStyle = DialStyle(rawValue: d.string(forKey: "dialStyle") ?? "") ?? .classic
     }
 
     func minutes(for phase: Phase) -> Int {
@@ -204,7 +209,8 @@ final class Prefs: ObservableObject {
         ringUntilAck = false; ringCount = 5; ringGap = 2
         overlayMode = .breakStart
         globalHotkeys = true
-        // 注意：compact 刻意不重設——使用者的視窗模式不該被「恢復預設」改掉
+        // 注意：compact 和 dialStyle 刻意不重設——視窗模式和外觀是個人選擇，
+        // 「恢復預設」是給計時與提醒用的——使用者的視窗模式不該被「恢復預設」改掉
     }
 }
 

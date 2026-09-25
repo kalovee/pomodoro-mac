@@ -21,6 +21,12 @@ final class FloatingPanel: NSPanel {
     var compactDragEnabled = false
     private var dragStartMouse: NSPoint?
     private var dragStartOrigin: NSPoint?
+    /// 這次按下之後有沒有真的拖動過。小於門檻的晃動仍算點擊。
+    private var didDrag = false
+    private let dragThreshold: CGFloat = 3
+    /// 游標的螢幕座標。平常就是 NSEvent.mouseLocation；
+    /// 留成可替換的，是因為探針送的合成事件不會移動真正的游標，不替換就測不到拖曳。
+    var screenMouseLocation: () -> NSPoint = { NSEvent.mouseLocation }
 
     /// 視窗自己有焦點時的按鍵。回傳 true 表示已處理。
     var onKey: ((NSEvent) -> Bool)?
@@ -50,8 +56,9 @@ final class FloatingPanel: NSPanel {
 
         switch event.type {
         case .leftMouseDown:
-            dragStartMouse = NSEvent.mouseLocation
+            dragStartMouse = screenMouseLocation()
             dragStartOrigin = frame.origin
+            didDrag = false
             super.sendEvent(event)
 
         case .leftMouseDragged:
@@ -60,13 +67,38 @@ final class FloatingPanel: NSPanel {
                 super.sendEvent(event)
                 return
             }
-            let now = NSEvent.mouseLocation
-            setFrameOrigin(NSPoint(x: startOrigin.x + now.x - startMouse.x,
-                                   y: startOrigin.y + now.y - startMouse.y))
+            let now = screenMouseLocation()
+            let dx = now.x - startMouse.x, dy = now.y - startMouse.y
+            // 小於門檻的晃動不算拖曳，維持它是一次點擊
+            guard didDrag || hypot(dx, dy) >= dragThreshold else { return }
+            didDrag = true
+            setFrameOrigin(NSPoint(x: startOrigin.x + dx, y: startOrigin.y + dy))
 
         case .leftMouseUp:
-            dragStartMouse = nil
-            dragStartOrigin = nil
+            defer {
+                dragStartMouse = nil
+                dragStartOrigin = nil
+                didDrag = false
+            }
+            // 拖過的話，不能把放開事件原樣交給 SwiftUI。
+            // 視窗是跟著游標一起移動的，放開時游標在視窗內的座標跟按下時幾乎一樣，
+            // SwiftUI 會看成「原地按下、原地放開」＝一次點擊——提醒中拖一下就被誤確認，
+            // 從懸停按鈕上開始拖也會誤按。把放開點改到視窗外面，SwiftUI 就會當成
+            // 「按下後拖出去」而取消，不觸發任何點擊。
+            if didDrag,
+               let cancelled = NSEvent.mouseEvent(
+                    with: .leftMouseUp,
+                    location: NSPoint(x: -10_000, y: -10_000),
+                    modifierFlags: event.modifierFlags,
+                    timestamp: event.timestamp,
+                    windowNumber: event.windowNumber,
+                    context: nil,
+                    eventNumber: event.eventNumber,
+                    clickCount: event.clickCount,
+                    pressure: event.pressure) {
+                super.sendEvent(cancelled)
+                return
+            }
             super.sendEvent(event)
 
         default:
@@ -133,6 +165,8 @@ final class PanelController: NSObject {
         applyMode(prefs.compact, animated: false)
         restoreOrigin()
         panel.orderFront(nil)
+        // 啟動時 SwiftUI 還沒畫任何東西，第一次算出的陰影是空的
+        invalidateShadowSoon()
     }
 
     // MARK: 熱鍵
@@ -198,9 +232,12 @@ final class PanelController: NSObject {
             }
         }
 
+        if !compact { panel.alphaValue = 1 }
         panel.isOpaque = !compact
         panel.backgroundColor = compact ? .clear : Theme.groundNS
-        panel.hasShadow = !compact
+        // 縮小模式也用系統陰影。視窗伺服器依內容的透明度輪廓算陰影、畫在視窗外面，
+        // 不會被視窗邊界切掉，而且自動跟著錶盤的形狀走。
+        panel.hasShadow = true
         // 縮小時由 FloatingPanel 自己拖曳，避免和系統背景拖曳同時移動兩次。
         panel.compactDragEnabled = compact
         // 換 styleMask 會重設這幾個屬性，補回來
@@ -208,7 +245,7 @@ final class PanelController: NSObject {
         panel.isMovableByWindowBackground = !compact
         reassert()
 
-        let size = compact ? Metrics.compact : Metrics.full
+        let size = compact ? prefs.dialStyle.compactSize : Metrics.full
         let now = panel.frame
         // 以目前的中心為軸心收放，使用者把視窗拖到哪就在哪縮放
         let target = NSRect(x: (now.midX - size.width / 2).rounded(),
@@ -231,6 +268,7 @@ final class PanelController: NSObject {
                 guard let self else { return }
                 self.panel.invalidateShadow()
                 self.saveOrigin()
+                self.invalidateShadowSoon()
             }
         })
     }
@@ -273,6 +311,15 @@ final class PanelController: NSObject {
         // 會在舊值還沒被換掉時就觸發一次 SwiftUI 重繪——SwiftUI 用舊值畫完，
         // 通知也被消耗掉了，等新值真正寫入時就不會再重繪。
         // 結果是視窗已經縮小、畫面卻還是完整模式，永遠慢一拍。
+        // 縮小模式下切風格，視窗要變成那個風格的形狀
+        prefs.$dialStyle.dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, self.prefs.compact else { return }
+                self.applyMode(true, animated: true)
+            }
+            .store(in: &bag)
+
         prefs.$compact.dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] compact in
@@ -302,6 +349,16 @@ final class PanelController: NSObject {
                            object: panel, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.saveOrigin() }
         }
+        center.addObserver(forName: .dialFadeChanged, object: nil, queue: .main) { [weak self] note in
+            let faded = (note.object as? Bool) ?? false
+            MainActor.assumeIsolated {
+                guard let self, self.prefs.compact else { return }
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.18
+                    self.panel.animator().alphaValue = faded ? 0.42 : 1
+                }
+            }
+        }
         center.addObserver(forName: NSApplication.didBecomeActiveNotification,
                            object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.reassert() }
@@ -317,6 +374,14 @@ final class PanelController: NSObject {
 
     fileprivate func logClose() {
         Diagnostics.log("視窗收到關閉請求（已攔下，改為結束 App）")
+    }
+
+    /// 系統陰影是照「當下畫面」算的。模式或風格切換時，SwiftUI 的淡入淡出和視窗動畫不同步，
+    /// 立刻重算可能抓到半透明的舊畫面，陰影就會多出一塊。晚一點再算一次。
+    private func invalidateShadowSoon() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.morph + 0.1) { [weak self] in
+            MainActor.assumeIsolated { self?.panel.invalidateShadow() }
+        }
     }
 
     private func saveOrigin() {
