@@ -404,11 +404,45 @@ final class PomodoroModel: ObservableObject {
     private func record(minutes: Int, task label: String) {
         history.insert(
             Session(finishedAt: Date(),
-                    task: label.isEmpty ? "未命名" : label,
+                    task: normalizedTask(label),
                     minutes: minutes),
             at: 0)
-        if history.count > 200 { history.removeLast(history.count - 200) }
+        // 原本只留 200 筆，大約一個月前的紀錄會被悄悄刪掉。
+        // 還是留一個安全上限：整份紀錄存在 UserDefaults 裡，一萬筆約 1 MB、夠用好幾年。
+        if history.count > Self.historyLimit { history.removeLast(history.count - Self.historyLimit) }
         saveHistory()
+    }
+
+    static let historyLimit = 10_000
+
+    /// 任務名稱的統一規則：去掉前後空白，空的就叫「未命名」
+    private func normalizedTask(_ label: String) -> String {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "未命名" : trimmed
+    }
+
+    func deleteSession(id: UUID) {
+        history.removeAll { $0.id == id }
+        saveHistory()
+    }
+
+    func renameSession(id: UUID, to label: String) {
+        guard let i = history.firstIndex(where: { $0.id == id }) else { return }
+        history[i].task = normalizedTask(label)
+        saveHistory()
+    }
+
+    /// 最近用過的任務名稱，新的在前、不重複，給任務欄的快速選單用。
+    /// 從清單挑而不是重打，統計裡同一個任務才不會因為一個空格被拆成兩筆。
+    var recentTasks: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for s in history where s.task != "未命名" && !seen.contains(s.task) {
+            seen.insert(s.task)
+            result.append(s.task)
+            if result.count == 6 { break }
+        }
+        return result
     }
 
     // MARK: 提醒

@@ -135,7 +135,8 @@ private struct FullView: View {
             .multilineTextAlignment(.center)
             .focused($taskFocused)
             .padding(.vertical, 8)
-            .padding(.horizontal, 12)
+            // 兩邊都留出選單圖示的寬度，文字才會保持置中、長字也不會壓到圖示
+            .padding(.horizontal, 28)
             .background(
                 RoundedRectangle(cornerRadius: 9)
                     .fill(Theme.surface)
@@ -146,6 +147,33 @@ private struct FullView: View {
                     )
             )
             .onSubmit { taskFocused = false }
+            .overlay(alignment: .trailing) { recentTaskMenu }
+    }
+
+    /// 任務欄右邊的小選單：最近用過的任務，點一下就填好。
+    /// 重打容易多一個空格或少一個字，統計就會把同一件事拆成兩筆。
+    @ViewBuilder
+    private var recentTaskMenu: some View {
+        let recent = model.recentTasks
+        if !recent.isEmpty {
+            Menu {
+                ForEach(recent, id: \.self) { name in
+                    Button(name) {
+                        model.task = name
+                        taskFocused = false
+                    }
+                }
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.muted)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .padding(.trailing, 9)
+            .help("最近的任務")
+        }
     }
 
     private var controls: some View {

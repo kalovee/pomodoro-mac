@@ -160,7 +160,7 @@ private struct TimerWash: View {
                 let a = -Double.pi / 2 + 2 * .pi * progress
                 var edge = Path()
                 edge.move(to: center)
-                edge.addLine(to: CGPoint(x: center.x + r * cos(a), y: center.y + r * sin(a)))
+                edge.addLine(to: CGPoint(x: center.x + r * CGFloat(cos(a)), y: center.y + r * CGFloat(sin(a))))
                 ctx.stroke(edge, with: .color(tint.opacity(0.35)), lineWidth: 1)
             }
         }
@@ -270,7 +270,7 @@ private func pie(center: CGPoint, radius: CGFloat, fraction: Double) -> Path {
     let steps = max(2, Int(96 * fraction))
     for i in 0...steps {
         let a = -Double.pi / 2 + 2 * .pi * fraction * Double(i) / Double(steps)
-        p.addLine(to: CGPoint(x: center.x + radius * cos(a), y: center.y + radius * sin(a)))
+        p.addLine(to: CGPoint(x: center.x + radius * CGFloat(cos(a)), y: center.y + radius * CGFloat(sin(a))))
     }
     p.closeSubpath()
     return p
@@ -285,7 +285,7 @@ private func sector(center: CGPoint, radius: CGFloat, from start: Double) -> Pat
     let steps = max(2, Int(96 * fraction))
     for i in 0...steps {
         let a = -Double.pi / 2 + 2 * .pi * (start + fraction * Double(i) / Double(steps))
-        p.addLine(to: CGPoint(x: center.x + radius * cos(a), y: center.y + radius * sin(a)))
+        p.addLine(to: CGPoint(x: center.x + radius * CGFloat(cos(a)), y: center.y + radius * CGFloat(sin(a))))
     }
     p.closeSubpath()
     return p
@@ -964,12 +964,12 @@ private struct MoonDial: View {
         // 月緣：上 → 左 → 下
         for i in 1...n {
             let a = -Double.pi / 2 - Double.pi * Double(i) / Double(n)
-            p.addLine(to: CGPoint(x: center.x + r * cos(a), y: center.y + r * sin(a)))
+            p.addLine(to: CGPoint(x: center.x + r * CGFloat(cos(a)), y: center.y + r * CGFloat(sin(a))))
         }
         // 明暗交界：下 → 上，中間在 x = center + k·r
         for i in 1...n {
             let a = Double.pi / 2 - Double.pi * Double(i) / Double(n)
-            p.addLine(to: CGPoint(x: center.x + k * r * cos(a), y: center.y + r * sin(a)))
+            p.addLine(to: CGPoint(x: center.x + CGFloat(k) * r * CGFloat(cos(a)), y: center.y + r * CGFloat(sin(a))))
         }
         p.closeSubpath()
         return p
@@ -1113,7 +1113,7 @@ private struct BauhausDial: View {
                     wedge.move(to: hub)
                     for k in 0...16 {
                         let a = a0 + Double.pi / 2 * Double(k) / 16
-                        wedge.addLine(to: CGPoint(x: hub.x + q * cos(a), y: hub.y + q * sin(a)))
+                        wedge.addLine(to: CGPoint(x: hub.x + q * CGFloat(cos(a)), y: hub.y + q * CGFloat(sin(a))))
                     }
                     wedge.closeSubpath()
                     if i < done {
@@ -1136,7 +1136,7 @@ private struct BauhausDial: View {
                     dome.move(to: CGPoint(x: hc.x - hr, y: hc.y))
                     for k in 0...24 {
                         let a = Double.pi + Double.pi * Double(k) / 24
-                        dome.addLine(to: CGPoint(x: hc.x + hr * cos(a), y: hc.y + hr * sin(a)))
+                        dome.addLine(to: CGPoint(x: hc.x + hr * CGFloat(cos(a)), y: hc.y + hr * CGFloat(sin(a))))
                     }
                     dome.closeSubpath()
                     ctx.fill(dome, with: .color(Self.blue))
@@ -1258,7 +1258,7 @@ private struct StationTicks: Shape {
             let mid = radius - len / 2
             p.addPath(Path(CGRect(x: -wid / 2, y: -len / 2, width: wid, height: len))
                 .applying(CGAffineTransform(rotationAngle: a))
-                .applying(CGAffineTransform(translationX: c.x + sin(a) * mid, y: c.y - cos(a) * mid)))
+                .applying(CGAffineTransform(translationX: c.x + CGFloat(sin(a)) * mid, y: c.y - CGFloat(cos(a)) * mid)))
         }
         return p
     }
