@@ -1,0 +1,16 @@
+# 每次 push 都在 macOS 上跑一次 build.sh。
+# 開發時常常在沒有 Swift 編譯器的環境改程式碼，這裡是第一道真的編譯過的檢查。
+name: Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: 編譯 番茄鐘.app
+        # 輸出到暫存資料夾，不在工作目錄留下 .app
+        run: ./build.sh "$RUNNER_TEMP"
