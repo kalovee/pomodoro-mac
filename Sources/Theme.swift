@@ -172,7 +172,9 @@ struct RoundDots: View {
 
 /// 兩種模式的視窗尺寸，集中在一個地方，讓畫面和視窗動畫用同一組數字
 enum Metrics {
-    static let full = CGSize(width: 320, height: 408)
+    /// 高度要算進「結束並記下 N 分鐘」那一列（約 34pt）。
+    /// 原本的 408 沒算到，專注滿半分鐘按鈕一出現，底部那列（今日 N、設定齒輪）就被擠出視窗。
+    static let full = CGSize(width: 320, height: 460)
     static let compact = CGSize(width: 168, height: 168)
     static let morph = 0.26
     /// 提醒脈動的半週期（秒）

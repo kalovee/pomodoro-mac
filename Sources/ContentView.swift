@@ -175,7 +175,8 @@ private struct FullView: View {
     }
 
     /// 只有真的累積到一分鐘以上才出現。
-    /// 放在按鈕下方本來就空著的那塊，不必為它挪版面。
+    /// 視窗高度（Metrics.full）已經替這一列留了位置：平常是下方 Spacer 的空白，
+    /// 按鈕出現時吃掉那塊空白，上面的東西和底部那列都不會移動。
     @ViewBuilder
     private var logProgress: some View {
         if model.canLogProgress {
@@ -189,7 +190,7 @@ private struct FullView: View {
             }
             .buttonStyle(.plain)
             .help("把已經專注的時間記進紀錄，然後進入休息")
-            .padding(.top, 12)
+            .padding(.top, 10)
         }
     }
 
