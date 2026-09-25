@@ -77,8 +77,8 @@ struct Ticks: Shape {
 
             // 刻度從外緣往內長，中心落在外緣與內端的中點
             let mid = radius - height / 2
-            let position = CGPoint(x: center.x + sin(angle) * mid,
-                                   y: center.y - cos(angle) * mid)
+            let position = CGPoint(x: center.x + CGFloat(sin(angle)) * mid,
+                                   y: center.y - CGFloat(cos(angle)) * mid)
 
             let tick = Path(roundedRect: CGRect(x: -width / 2, y: -height / 2,
                                                 width: width, height: height),

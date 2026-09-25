@@ -298,9 +298,18 @@ struct SettingsView: View {
     }
 }
 
+/// 紀錄頁的暫時狀態。不用 @State 的原因見 ContentView.swift 的 ViewState。
+final class HistoryUIState: ObservableObject {
+    @Published var confirmClear = false
+    /// 正在改名的那一筆；nil 表示沒有在改
+    @Published var renaming: Session?
+    @Published var draft = ""
+}
+
 struct HistoryView: View {
     @EnvironmentObject var model: PomodoroModel
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var ui = HistoryUIState()
 
     var body: some View {
         SheetFrame(title: "完成紀錄",
@@ -350,17 +359,49 @@ struct HistoryView: View {
                                     .foregroundStyle(Theme.muted)
                             }
                             .padding(.vertical, 7)
+                            .contentShape(Rectangle())
+                            .contextMenu {
+                                Button("修改任務名稱…") {
+                                    ui.draft = s.task == "未命名" ? "" : s.task
+                                    ui.renaming = s
+                                }
+                                Button("刪除這筆", role: .destructive) {
+                                    model.deleteSession(id: s.id)
+                                }
+                            }
+                            .help("按右鍵可以修改名稱或刪除")
                             Divider()
                         }
                     }
                 }
             }
         } footer: {
-            Button("清除紀錄") { model.clearHistory() }
-                .disabled(model.history.isEmpty && model.todayCount == 0)
+            // 先確認再清：原本按一下就全部刪掉，沒有任何復原的辦法
+            Button("清除紀錄…") { ui.confirmClear = true }
+                .disabled(model.history.isEmpty)
             Spacer()
             Button("關閉") { dismiss() }
                 .keyboardShortcut(.defaultAction)
+        }
+        .confirmationDialog("清除全部 \(model.history.count) 筆紀錄？",
+                            isPresented: $ui.confirmClear, titleVisibility: .visible) {
+            Button("清除", role: .destructive) { model.clearHistory() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("統計也會一起歸零，這個動作無法復原。")
+        }
+        .alert("修改任務名稱",
+               isPresented: Binding(get: { ui.renaming != nil },
+                                    set: { if !$0 { ui.renaming = nil } })) {
+            TextField("任務名稱", text: $ui.draft)
+            Button("儲存") {
+                if let s = ui.renaming { model.renameSession(id: s.id, to: ui.draft) }
+                ui.renaming = nil
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("取消", role: .cancel) { ui.renaming = nil }
+        } message: {
+            Text("留空會改成「未命名」。")
         }
     }
 

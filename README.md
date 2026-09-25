@@ -18,6 +18,8 @@ PDF or a book filling the display.
 
 Builds with **Xcode Command Line Tools only** — no Xcode needed: `./build.sh`
 
+Every push is compiled on macOS by GitHub Actions (`.github/workflows/build.yml`).
+
 > The rest of this README is in Traditional Chinese. Beyond usage, it documents the
 > non-obvious macOS pitfalls this app hit — AppKit not counting `NSPanel`s as windows,
 > the compositing cost of repainting over a full-screen app, and `@State` now requiring
@@ -77,13 +79,15 @@ Builds with **Xcode Command Line Tools only** — no Xcode needed: `./build.sh`
   浮動時預設會把 Dock 圖示收起來（一般 App 在別人進全螢幕時會被系統收走，附屬模式才待得住）
 - **縮小時閒置變半透明**：滑鼠不在上面就淡到 42%，移過去才恢復，讀書時不干擾
 - **時間到自動接下一段**（可開關）
-- 任務標籤：輸入正在做什麼，完成後存進紀錄
+- 任務標籤：輸入正在做什麼，完成後存進紀錄。欄位右邊的時鐘選單列出最近用過的任務，點一下就填好
 - **中途結束也能記**：讀到一半想收了，按「結束並記下 N 分鐘」就會把**實際專注的時間**
   寫進紀錄再進入休息。暫停的時間不會被算進去
 - 今日完成番茄數與專注總時數，**從紀錄推導**（不另外存一份，所以讀書過午夜也不會累積到隔天）
 - 完成紀錄**按日期分組**，每天有小計；今天／昨天用相對說法，更早的標月日與星期
 - **紀錄統計**：紀錄頁上方有本週專注時數、連續專注天數、今天完成數，最近 7 天的長條圖，
   以及最近 7 天花最多時間的三個任務。全部從紀錄推導，不另外存
+- **紀錄可以修正**：在任何一筆上按右鍵可以改任務名稱或刪除；「清除紀錄」會先確認。
+  紀錄最多保留一萬筆（原本只有 200 筆，大約一個月前的會被悄悄刪掉）
 - **時間到的提醒**（這一版重做過）：
   - 20 種內建鈴聲可選、可試聽，音量可調
   - **想要更多聲音**：把任何 `.aiff / .wav / .m4a / .mp3` 丟進 `~/Library/Sounds`
