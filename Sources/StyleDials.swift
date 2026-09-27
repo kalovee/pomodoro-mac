@@ -245,6 +245,8 @@ private struct CellText: View {
     let font: Font
     let cell: CGFloat
     let color: Color
+    /// 冒號的格寬（相對於數字格）。粗字體的冒號比較胖，要給寬一點
+    var colonRatio: CGFloat = 0.42
 
     var body: some View {
         HStack(spacing: 0) {
@@ -252,7 +254,7 @@ private struct CellText: View {
                 Text(String(ch))
                     .font(font)
                     .foregroundStyle(color)
-                    .frame(width: ch == ":" ? cell * 0.42 : cell)
+                    .frame(width: ch == ":" ? cell * colonRatio : cell)
             }
         }
     }
@@ -1143,8 +1145,10 @@ private struct BauhausDial: View {
                 }
             }
 
-            CellText(text: c.clock, font: .custom("Futura-Bold", size: w * 0.16),
-                     cell: w * 0.10, color: Self.paper)
+            // Futura-Bold 的數字約 0.6 倍字級寬。原本字級 0.16w 配 0.10w 的格子，
+            // 格子等於字寬、字黏在一起；現在每個字兩側各留約 0.015w
+            CellText(text: c.clock, font: .custom("Futura-Bold", size: w * 0.135),
+                     cell: w * 0.112, color: Self.paper, colonRatio: 0.55)
                 .frame(width: band.width - w * 0.08, alignment: .leading)
                 .position(x: band.midX, y: band.midY)
 
