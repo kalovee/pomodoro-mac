@@ -21,6 +21,8 @@ struct SettingsView: View {
                 row("短休息", value: $prefs.shortMin, range: 1...60, unit: "分鐘")
                 row("長休息", value: $prefs.longMin, range: 1...60, unit: "分鐘")
                 row("幾輪後長休息", value: $prefs.roundsPerLong, range: 2...8, unit: "輪")
+                row("單次倒數", value: $prefs.countdownMin, range: 1...180, unit: "分鐘")
+                caption("完整模式下沒在計時時，也可以直接在錶盤上拖一圈設定時間（1–60 分鐘）。")
             }
 
             group("提醒") {

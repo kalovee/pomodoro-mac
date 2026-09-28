@@ -5,7 +5,7 @@ import SwiftUI
 /// 只換錶盤本身；按鈕、任務欄、設定頁維持原本的主題。縮小模式的**形狀**跟著風格走——
 /// 像素是方的、翻頁鐘和 LCD 是寬的、沙漏是高的——因為把一個方形像素螢幕硬塞進圓形裡很彆扭。
 enum DialStyle: String, CaseIterable, Identifiable {
-    case classic, pixel, flip, lcd, hourglass, moon, water, bauhaus, minimal, station
+    case classic, pixel, flip, lcd, hourglass, moon, water, bauhaus, minimal, station, candle, vinyl, nixie
 
     var id: String { rawValue }
 
@@ -21,6 +21,9 @@ enum DialStyle: String, CaseIterable, Identifiable {
         case .bauhaus:   return "包浩斯"
         case .minimal:   return "極簡環"
         case .station:   return "車站鐘"
+        case .candle:    return "蠟燭"
+        case .vinyl:     return "黑膠唱片"
+        case .nixie:     return "輝光管"
         }
     }
 
@@ -30,12 +33,15 @@ enum DialStyle: String, CaseIterable, Identifiable {
         case .pixel:     return "8-bit 掌機的四階綠，附 HP 條"
         case .flip:      return "分鐘變的時候翻一頁"
         case .lcd:       return "七段數字，右上角是輪數"
-        case .hourglass: return "上面的沙就是剩下的時間"
+        case .hourglass: return "木框玻璃與真沙，新的一段會翻面"
         case .moon:      return "由滿月慢慢缺成新月"
         case .water:     return "兩道波浪，淹到的數字反白"
         case .bauhaus:   return "紅圓扇形，四分之一圓記輪數"
         case .minimal:   return "一道圓環，末端一顆圓鈕"
         case .station:   return "紅弧是剩下的時間，紅秒針一秒一跳"
+        case .candle:    return "蠟燭慢慢燒短，燭淚往下流"
+        case .vinyl:     return "唱臂從外圈往內走到結尾"
+        case .nixie:     return "玻璃管裡的橘色發光數字"
         }
     }
 
@@ -47,8 +53,9 @@ enum DialStyle: String, CaseIterable, Identifiable {
         case .pixel:     return CGSize(width: 160, height: 160)
         case .flip:      return CGSize(width: 232, height: 112)
         case .lcd:       return CGSize(width: 212, height: 112)
-        case .hourglass: return CGSize(width: 132, height: 184)
+        case .hourglass, .candle: return CGSize(width: 132, height: 184)
         case .bauhaus:   return CGSize(width: 164, height: 164)
+        case .nixie:     return CGSize(width: 232, height: 112)
         default:         return CGSize(width: 168, height: 168)
         }
     }
@@ -59,15 +66,16 @@ enum DialStyle: String, CaseIterable, Identifiable {
         case .pixel:     return CGSize(width: 196, height: 196)
         case .flip:      return CGSize(width: 268, height: 130)
         case .lcd:       return CGSize(width: 252, height: 132)
-        case .hourglass: return CGSize(width: 146, height: 200)
+        case .hourglass, .candle: return CGSize(width: 146, height: 200)
         case .bauhaus:   return CGSize(width: 192, height: 192)
+        case .nixie:     return CGSize(width: 268, height: 130)
         default:         return CGSize(width: 196, height: 196)
         }
     }
 
     var isRound: Bool {
         switch self {
-        case .classic, .moon, .water, .minimal, .station: return true
+        case .classic, .moon, .water, .minimal, .station, .vinyl: return true
         default: return false
         }
     }
@@ -77,7 +85,8 @@ enum DialStyle: String, CaseIterable, Identifiable {
         case .pixel:     return 6       // 像素螢幕不該太圓
         case .flip:      return 18
         case .lcd:       return 22
-        case .hourglass: return 26
+        case .hourglass, .candle: return 26
+        case .nixie:     return 16
         case .bauhaus:   return 4       // 包浩斯是直角的
         default:         return 0
         }
@@ -98,7 +107,7 @@ enum DialStyle: String, CaseIterable, Identifiable {
     /// Apple 在 iOS 用了類似的樣子後付過授權費，而這個 repo 是公開的。
     var dimsOnHover: Bool {
         switch self {
-        case .flip, .lcd, .hourglass, .station, .moon, .bauhaus: return true
+        case .flip, .lcd, .hourglass, .station, .moon, .bauhaus, .candle, .vinyl, .nixie: return true
         default: return false
         }
     }
@@ -113,7 +122,7 @@ enum DialStyle: String, CaseIterable, Identifiable {
     /// 車站鐘的紅秒針、LCD 的灰綠液晶就是它們的身分。
     var keepsPalette: Bool {
         switch self {
-        case .pixel, .flip, .lcd, .bauhaus, .station: return true
+        case .pixel, .flip, .lcd, .bauhaus, .station, .candle, .vinyl, .nixie: return true
         default: return false
         }
     }
@@ -128,6 +137,9 @@ enum DialStyle: String, CaseIterable, Identifiable {
         case .bauhaus: return Color(hex: 0xF1EADB)
         // 深色模式下一整片白錶面太刺眼，壓成暖灰，刻度和指針的對比還夠
         case .station: return Theme.dyn(0xFBFBF8, 0xD9D6D0)
+        case .candle:  return Color(hex: 0x1C1714)
+        case .vinyl:   return Color(hex: 0x161616)
+        case .nixie:   return Color(hex: 0x17110D)
         default:       return Theme.surface
         }
     }
@@ -140,6 +152,7 @@ enum DialStyle: String, CaseIterable, Identifiable {
         case .moon:    return Color(hex: 0x000000).opacity(0.5)
         case .bauhaus: return Color(hex: 0x1A1A1A)
         case .station: return Color(hex: 0x1A1A1A).opacity(0.18)
+        case .candle, .vinyl, .nixie: return Color(hex: 0x000000).opacity(0.5)
         default:       return Theme.hairline
         }
     }

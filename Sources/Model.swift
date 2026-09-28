@@ -98,6 +98,31 @@ struct Preset: Identifiable, Equatable {
     ]
 }
 
+// MARK: - 計時模式
+
+/// 番茄鐘之外的兩種用法。煮麵、小考要的是「設一個時間、到了叫我」；
+/// 一段不知道會多長的專注，要的是從零往上數。
+enum TimerMode: String, CaseIterable, Identifiable {
+    case pomodoro, countdown, stopwatch
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .pomodoro:  return "番茄鐘"
+        case .countdown: return "倒數"
+        case .stopwatch: return "碼錶"
+        }
+    }
+
+    var note: String {
+        switch self {
+        case .pomodoro:  return "專注與休息輪流，會記進紀錄"
+        case .countdown: return "設一個時間，到了就提醒，不記紀錄"
+        case .stopwatch: return "從零往上數，按「結束並記下」存進紀錄"
+        }
+    }
+}
+
 // MARK: - 休息遮罩
 
 /// 遮罩要在什麼時候出現。三態而不是開關，是因為「休息時遮罩」這句話
@@ -153,6 +178,11 @@ final class Prefs: ObservableObject {
     @Published var overlayMode: OverlayMode {
         didSet { d.set(overlayMode.rawValue, forKey: "overlayMode") }
     }
+    @Published var timerMode: TimerMode {
+        didSet { d.set(timerMode.rawValue, forKey: "timerMode") }
+    }
+    /// 單次倒數的長度（分鐘）
+    @Published var countdownMin: Int { didSet { d.set(countdownMin, forKey: "countdownMin") } }
 
     init() {
         d.register(defaults: [
@@ -165,6 +195,8 @@ final class Prefs: ObservableObject {
             "overlayMode": OverlayMode.breakStart.rawValue,
             "globalHotkeys": true,
             "dialStyle": DialStyle.classic.rawValue,
+            "timerMode": TimerMode.pomodoro.rawValue,
+            "countdownMin": 10,
         ])
         workMin = d.integer(forKey: "workMin")
         shortMin = d.integer(forKey: "shortMin")
@@ -190,6 +222,8 @@ final class Prefs: ObservableObject {
         ringGap = d.integer(forKey: "ringGap")
         globalHotkeys = d.bool(forKey: "globalHotkeys")
         dialStyle = DialStyle(rawValue: d.string(forKey: "dialStyle") ?? "") ?? .classic
+        timerMode = TimerMode(rawValue: d.string(forKey: "timerMode") ?? "") ?? .pomodoro
+        countdownMin = max(1, d.integer(forKey: "countdownMin"))
     }
 
     func minutes(for phase: Phase) -> Int {
@@ -224,6 +258,7 @@ final class Prefs: ObservableObject {
         ringUntilAck = false; ringCount = 5; ringGap = 2
         overlayMode = .breakStart
         globalHotkeys = true
+        countdownMin = 10
         // 注意：compact 和 dialStyle 刻意不重設——視窗模式和外觀是個人選擇，
         // 「恢復預設」是給計時與提醒用的——使用者的視窗模式不該被「恢復預設」改掉
     }
@@ -263,6 +298,15 @@ final class PomodoroModel: ObservableObject {
     /// 切換模式不會中斷，也不依賴 SwiftUI 動畫的啟動時機。
     @Published private(set) var breath = false
 
+    /// 碼錶模式已經過的時間。另外存一份而不是借用 remaining，兩種方向的語意才不會混在一起。
+    @Published private(set) var elapsed: TimeInterval = 0
+    /// 每開始新的一段（接下一段、重設、換模式）就 +1。沙漏靠它知道該翻過來了。
+    @Published private(set) var segmentID = 0
+    /// 每完成一段（專注結束、倒數到時、碼錶記下）就 +1，觸發錶盤上的完成動畫。
+    @Published private(set) var completionCount = 0
+    /// 目前的提醒是單次倒數到時。倒數沒有「下一段」，提醒文字、通知和遮罩都不一樣。
+    @Published private(set) var alertIsCountdown = false
+
     /// 自動接下一段最多等多久才自己開始
     static let autoContinueGrace: TimeInterval = 300
 
@@ -271,26 +315,63 @@ final class PomodoroModel: ObservableObject {
     private var ticker: Timer?
     private var graceTimer: Timer?
     private var breathTimer: Timer?
+    /// 碼錶：這次按下開始的時間，和之前累積的時間
+    private var stopwatchStart: Date?
+    private var stopwatchBase: TimeInterval = 0
     private let d = UserDefaults.standard
 
     init(prefs: Prefs) {
         self.prefs = prefs
         loadHistory()
-        remaining = TimeInterval(prefs.minutes(for: .work) * 60)
+        remaining = total
     }
 
-    // 目前階段的總長度，用來畫進度環
+    var mode: TimerMode { prefs.timerMode }
+
+    // 目前這一段的總長度，用來畫進度環。碼錶沒有終點，以一小時為一圈。
     var total: TimeInterval {
-        max(1, TimeInterval(prefs.minutes(for: phase) * 60))
+        switch mode {
+        case .pomodoro:  return max(1, TimeInterval(prefs.minutes(for: phase) * 60))
+        case .countdown: return max(1, TimeInterval(prefs.countdownMin * 60))
+        case .stopwatch: return 3600
+        }
     }
 
     var progress: Double {
-        min(1, max(0, 1 - remaining / total))
+        if mode == .stopwatch {
+            return elapsed.truncatingRemainder(dividingBy: 3600) / 3600
+        }
+        return min(1, max(0, 1 - remaining / total))
     }
 
+    /// 「MM:SS」。超過一小時分鐘數繼續往上（例如 75:30），跟番茄鐘的 120:00 同一種寫法，
+    /// 錶盤拆分鐘和秒的方式就不必另外處理。
     var clock: String {
-        let s = max(0, Int(remaining.rounded()))
+        let s = mode == .stopwatch ? max(0, Int(elapsed)) : max(0, Int(remaining.rounded()))
         return String(format: "%02d:%02d", s / 60, s % 60)
+    }
+
+    /// 錶盤上方的小字
+    var eyebrow: String {
+        if alerting { return alertIsCountdown ? "時間到" : alertEyebrow(for: alertFinished) }
+        switch mode {
+        case .pomodoro:  return phase.title
+        case .countdown: return "倒數"
+        case .stopwatch: return "碼錶"
+        }
+    }
+
+    /// 換模式。一律停下來、回到這個模式的起點，避免一段倒數跑到一半變成碼錶這種說不清的狀態。
+    func setMode(_ newMode: TimerMode) {
+        guard newMode != mode else { return }
+        clearAlert()
+        stopTicker()
+        prefs.timerMode = newMode
+        if newMode != .pomodoro { phase = .work }
+        stopwatchBase = 0
+        elapsed = 0
+        remaining = total
+        segmentID += 1
     }
 
     // MARK: 控制
@@ -309,9 +390,19 @@ final class PomodoroModel: ObservableObject {
     /// 使用者什麼都沒看到，看起來就像功能沒做出來。
     private func beginCountdown() {
         guard !running else { return }
+        if mode == .stopwatch {
+            stopwatchStart = Date()
+            running = true
+            startTicker()
+            return
+        }
         if remaining <= 0 { remaining = total }
         endDate = Date().addingTimeInterval(remaining)
         running = true
+        startTicker()
+    }
+
+    private func startTicker() {
         ticker = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
@@ -321,7 +412,12 @@ final class PomodoroModel: ObservableObject {
     func pause() {
         clearAlert()
         guard running else { return }
-        remaining = max(0, endDate?.timeIntervalSinceNow ?? remaining)
+        if mode == .stopwatch {
+            stopwatchBase = currentElapsed
+            elapsed = stopwatchBase
+        } else {
+            remaining = max(0, endDate?.timeIntervalSinceNow ?? remaining)
+        }
         stopTicker()
     }
 
@@ -329,11 +425,18 @@ final class PomodoroModel: ObservableObject {
     func reset() {
         clearAlert()
         stopTicker()
+        stopwatchBase = 0
+        elapsed = 0
         remaining = total
+        segmentID += 1
     }
 
-    /// 跳過目前這一段，直接進入下一段（不計入完成數）
+    /// 跳過目前這一段，直接進入下一段（不計入完成數）。
+    /// 只有番茄鐘有「下一段」，另外兩個模式什麼都不做。
+    var canSkip: Bool { mode == .pomodoro }
+
     func skip() {
+        guard canSkip else { return }
         clearAlert()
         stopTicker()
         advance(countAsDone: false)
@@ -346,6 +449,7 @@ final class PomodoroModel: ObservableObject {
         phase = .work
         roundInCycle = 0
         remaining = total
+        segmentID += 1
     }
 
     private func stopTicker() {
@@ -353,9 +457,21 @@ final class PomodoroModel: ObservableObject {
         ticker = nil
         running = false
         endDate = nil
+        stopwatchStart = nil
+    }
+
+    /// 碼錶此刻的精確時間（elapsed 只在秒數變了才發佈）
+    private var currentElapsed: TimeInterval {
+        stopwatchBase + (stopwatchStart.map { Date().timeIntervalSince($0) } ?? 0)
     }
 
     private func tick() {
+        if mode == .stopwatch {
+            let now = currentElapsed
+            // 跟倒數一樣，只在顯示的秒數變了才發佈
+            if Int(now) != Int(elapsed) { elapsed = now }
+            return
+        }
         guard let end = endDate else { return }
         let left = end.timeIntervalSinceNow
         if left <= 0 {
@@ -378,12 +494,17 @@ final class PomodoroModel: ObservableObject {
     /// `remaining` 只在計時中減少，所以 `total - remaining` 就是實際專注的時間——
     /// 中間暫停多久都不會被算進去。
     var elapsedMinutes: Int {
-        max(0, Int(((total - remaining) / 60).rounded()))
+        if mode == .stopwatch { return max(0, Int((currentElapsed / 60).rounded(.down))) }
+        return max(0, Int(((total - remaining) / 60).rounded()))
     }
 
-    /// 有沒有東西可以記。專注段、而且至少滿一分鐘。
+    /// 有沒有東西可以記。番茄鐘的專注段或碼錶，而且至少滿一分鐘。倒數不記紀錄。
     var canLogProgress: Bool {
-        phase == .work && elapsedMinutes >= 1
+        switch mode {
+        case .pomodoro:  return phase == .work && elapsedMinutes >= 1
+        case .stopwatch: return elapsedMinutes >= 1
+        case .countdown: return false
+        }
     }
 
     /// 提前結束這一段，但把已經專注的時間記進紀錄，然後進入休息。
@@ -398,7 +519,15 @@ final class PomodoroModel: ObservableObject {
         clearAlert()
         stopTicker()
         record(minutes: minutes, task: label)
-        advance(countAsDone: true)
+        completionCount += 1
+        if mode == .stopwatch {
+            // 碼錶沒有休息，記完就歸零等下一次
+            stopwatchBase = 0
+            elapsed = 0
+            segmentID += 1
+        } else {
+            advance(countAsDone: true)
+        }
     }
 
     private func record(minutes: Int, task label: String) {
@@ -453,8 +582,10 @@ final class PomodoroModel: ObservableObject {
     /// 「等按掉才開始」，這樣漏聽的那幾分鐘才不會從休息時間扣掉。
     func acknowledge() {
         guard alerting else { return }
+        let wasCountdown = alertIsCountdown
         clearAlert()
-        if prefs.autoContinue { beginCountdown() }
+        // 倒數到時沒有下一段可以接
+        if prefs.autoContinue && !wasCountdown { beginCountdown() }
     }
 
     /// 只清掉提醒本身，不碰計時。
@@ -467,11 +598,13 @@ final class PomodoroModel: ObservableObject {
         guard alerting else { return }
         alerting = false
         alertFinished = nil
+        alertIsCountdown = false
     }
 
-    private func raiseAlert(finished: Phase, task label: String) {
+    private func raiseAlert(finished: Phase, task label: String, countdown: Bool = false) {
+        alertIsCountdown = countdown
         alerting = true
-        alertFinished = finished
+        alertFinished = countdown ? nil : finished
         startBreathing()
 
         if prefs.soundOn {
@@ -482,14 +615,18 @@ final class PomodoroModel: ObservableObject {
                                gap: TimeInterval(prefs.ringGap))
         }
 
-        Notifier.shared.fire(finished: finished,
-                             next: phase,
-                             task: label,
-                             notify: prefs.notifyOn)
+        if countdown {
+            Notifier.shared.fireCountdown(minutes: prefs.countdownMin, task: label, notify: prefs.notifyOn)
+        } else {
+            Notifier.shared.fire(finished: finished,
+                                 next: phase,
+                                 task: label,
+                                 notify: prefs.notifyOn)
+        }
 
         // 自動接下一段不再立刻開始，改成等使用者確認；但排一個逾時，
         // 免得使用者離開一小時回來發現番茄鐘整個停在原地。
-        guard prefs.autoContinue else { return }
+        guard prefs.autoContinue && !countdown else { return }
         let t = Timer.scheduledTimer(withTimeInterval: Self.autoContinueGrace, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.acknowledge() }
         }
@@ -522,7 +659,17 @@ final class PomodoroModel: ObservableObject {
         let finished = phase
         let label = task.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        if mode == .countdown {
+            // 倒數沒有下一段：回到起點、提醒一次，不寫紀錄
+            remaining = total
+            segmentID += 1
+            completionCount += 1
+            raiseAlert(finished: finished, task: label, countdown: true)
+            return
+        }
+
         if finished == .work {
+            completionCount += 1
             record(minutes: prefs.workMin, task: label)
         }
 
@@ -546,6 +693,7 @@ final class PomodoroModel: ObservableObject {
             phase = .work
         }
         remaining = total
+        segmentID += 1
     }
 
     /// 今日完成的番茄數。
@@ -637,7 +785,30 @@ final class PomodoroModel: ObservableObject {
 
     /// 使用者在設定裡改了時長：沒在跑的話就直接套用新長度
     func syncDurationIfIdle() {
-        guard !running else { return }
+        guard !running, mode != .stopwatch else { return }
+        remaining = total
+    }
+
+    /// 拖曳錶盤設定時間：番茄鐘改目前這一段的長度，倒數改倒數長度。碼錶沒有長度可設。
+    var canSetDurationByDrag: Bool {
+        !running && !alerting && mode != .stopwatch
+    }
+
+    func setDurationByDrag(minutes: Int) {
+        guard canSetDurationByDrag else { return }
+        let m = min(60, max(1, minutes))
+        switch mode {
+        case .pomodoro:
+            switch phase {
+            case .work:       prefs.workMin = m
+            case .shortBreak: prefs.shortMin = m
+            case .longBreak:  prefs.longMin = m
+            }
+        case .countdown:
+            prefs.countdownMin = m
+        case .stopwatch:
+            return
+        }
         remaining = total
     }
 

@@ -40,6 +40,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         if notify { post(title: title, body: body) }
     }
 
+    /// 單次倒數到時。沒有「下一段」，只說哪一個倒數結束了。
+    func fireCountdown(minutes: Int, task: String, notify: Bool) {
+        let body = task.isEmpty ? "\(minutes) 分鐘的倒數結束了。" : "「\(task)」的 \(minutes) 分鐘倒數結束了。"
+        if notify { post(title: "⏰ 時間到", body: body) }
+    }
+
     private func post(title: String, body: String) {
         guard authorized else { return fallback(title: title, body: body) }
         let content = UNMutableNotificationContent()

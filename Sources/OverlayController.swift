@@ -72,6 +72,8 @@ final class OverlayController {
 
     private func evaluate() {
         guard !suppressed else { return }
+        // 單次倒數到時不是休息，不蓋住畫面
+        if model.alertIsCountdown { return }
 
         switch prefs.overlayMode {
         case .off:
