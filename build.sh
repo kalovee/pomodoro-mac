@@ -15,7 +15,9 @@ rm -rf "$APP" "$BUILD"
 mkdir -p "$BUILD" "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 echo "▸ 編譯"
+# 最低 macOS 26：介面用了 Liquid Glass（glassEffect 等 API）
 swiftc -O -whole-module-optimization \
+    -target "$(uname -m)-apple-macos26.0" \
     -o "$APP/Contents/MacOS/$APP_NAME" \
     Sources/*.swift
 
@@ -37,7 +39,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>CFBundleVersion</key><string>1</string>
-    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSHumanReadableCopyright</key><string></string>
 </dict>

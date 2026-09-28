@@ -1,5 +1,6 @@
 # 每次 push 都在 macOS 上跑一次 build.sh。
 # 開發時常常在沒有 Swift 編譯器的環境改程式碼，這裡是第一道真的編譯過的檢查。
+# 介面用了 Liquid Glass，需要 macOS 26 的 SDK。
 name: Build
 
 on:
@@ -8,9 +9,13 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: 工具版本
+        run: |
+          sw_vers
+          xcrun swiftc --version
       - name: 編譯 番茄鐘.app
         # 輸出到暫存資料夾，不在工作目錄留下 .app
         run: ./build.sh "$RUNNER_TEMP"
