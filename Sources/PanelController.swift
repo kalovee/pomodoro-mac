@@ -110,6 +110,32 @@ final class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
+/// 完整模式的視窗可以拖背景移動，但錶盤那一塊要留給「拖曳設定時間」。
+///
+/// 兩件事會讓錶盤上的拖曳到不了 SwiftUI 的手勢：
+/// 1. AppKit 在按下滑鼠時會問被點到的 view 能不能拿來移動視窗。整個畫面是同一個 hosting view，
+///    它對每個位置都回答可以，於是錶盤上的拖曳變成移動視窗。
+/// 2. 視窗沒有焦點時（讀書時焦點通常在別的 App），第一下按下只會讓視窗取得焦點，
+///    要拖第二次才有反應。
+/// 這裡在按下的那一刻看位置：落在錶盤上、而且現在可以設定時間，就不拿來移動視窗，
+/// 第一下也直接交給手勢。計時中錶盤不能設定時間，那時錶盤一樣可以拿來拖視窗。
+final class PanelHostingView<Content: View>: NSHostingView<Content> {
+    var keepsDragInside: (NSPoint) -> Bool = { _ in false }
+
+    private func onDial(_ event: NSEvent?) -> Bool {
+        guard let event, event.type == .leftMouseDown, event.window === window else { return false }
+        return keepsDragInside(convert(event.locationInWindow, from: nil))
+    }
+
+    override var mouseDownCanMoveWindow: Bool {
+        onDial(NSApp.currentEvent) ? false : super.mouseDownCanMoveWindow
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        onDial(event) || super.acceptsFirstMouse(for: event)
+    }
+}
+
 @MainActor
 final class PanelController: NSObject {
     let prefs: Prefs
@@ -136,10 +162,15 @@ final class PanelController: NSObject {
 
         super.init()
 
-        let hosting = NSHostingView(rootView:
+        let hosting = PanelHostingView(rootView:
             ContentView()
                 .environmentObject(model)
                 .environmentObject(prefs))
+        hosting.keepsDragInside = { [weak self] p in
+            guard let self, !self.prefs.compact, self.model.canSetDurationByDrag,
+                  let zone = DialDragZone.rect else { return false }
+            return zone.contains(p)
+        }
         // 關鍵：不讓 hosting view 反過來決定視窗尺寸，
         // 否則它會把視窗撐成「內容 + 標題列」，縮放結尾就會彈一下。
         hosting.sizingOptions = []

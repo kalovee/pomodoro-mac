@@ -19,11 +19,18 @@ extension Notification.Name {
     static let dialFadeChanged = Notification.Name("dialFadeChanged")
 }
 
-/// 提醒時錶盤該顯示的字。放在這裡是因為完整模式和縮小模式都要用。
 /// 完整模式錶盤區的寬度：視窗寬減掉左右內距。拖曳設定時間要用它找圓心。
 private let dialAreaWidth: CGFloat = Metrics.full.width - 36
 private let dialAreaHeight: CGFloat = 222
 
+/// 完整模式錶盤在視窗裡的位置（視窗內容座標，左上角為原點）。
+/// 給 PanelHostingView 用：這一塊的拖曳要留給「拖曳設定時間」，不能拿來移動視窗。
+@MainActor
+enum DialDragZone {
+    static var rect: CGRect?
+}
+
+/// 提醒時錶盤該顯示的字。放在這裡是因為完整模式和縮小模式都要用。
 func alertEyebrow(for finished: Phase?) -> String {
     finished == .work ? "休息時間" : "該專注了"
 }
@@ -183,6 +190,15 @@ private struct FullView: View {
             }
         }
         .frame(width: dialAreaWidth, height: dialAreaHeight)
+        // 回報錶盤的位置，視窗才知道這一塊不能拿來拖著移動（見 PanelHostingView）
+        .background {
+            GeometryReader { g in
+                Color.clear
+                    .onAppear { DialDragZone.rect = g.frame(in: .global) }
+                    .onChange(of: g.frame(in: .global)) { _, r in DialDragZone.rect = r }
+                    .onDisappear { DialDragZone.rect = nil }
+            }
+        }
         .animation(.easeInOut(duration: Metrics.pulse), value: model.breath)
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: ui.dragMinutes == nil)
         .contentShape(Rectangle())

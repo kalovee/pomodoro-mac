@@ -773,7 +773,7 @@ private struct HourglassDial: View {
                                          identity: SpinFlip(angle: 0, anchor: UnitPoint(x: 0.5, y: box.midY / h))),
                     removal: .identity))
 
-            VStack(spacing: 3) {
+            VStack(spacing: c.isCompact ? 1 : 3) {
                 Text(c.clock)
                     .font(Theme.clock(c.isCompact ? 22 : 26))
                     .foregroundStyle(Theme.ink)
@@ -781,7 +781,8 @@ private struct HourglassDial: View {
                     .lineLimit(1)
                 StatusLine(c: c, dot: 3.5)
             }
-            .position(x: w / 2, y: box.maxY + (h - box.maxY) / 2 + 2)
+            // 縮小模式提醒時，閃動的外框畫在輪廓裡面；文字要離底邊遠一點，不然「休息時間」會壓在外框上
+            .position(x: w / 2, y: box.maxY + (h - box.maxY) / 2 + (c.isCompact ? -3 : 2))
         }
         .frame(width: w, height: h)
         // 動畫只綁在 segmentID：一段開始時轉一次，轉完就停
@@ -1501,13 +1502,14 @@ private struct CandleDial: View {
 
     var body: some View {
         let w = size.width, h = size.height
-        let baseY = h * (c.isCompact ? 0.70 : 0.72)
+        // 縮小模式燭台放高一點、蠟燭短一點，底下才放得下兩行字
+        let baseY = h * (c.isCompact ? 0.67 : 0.72)
 
         ZStack {
             Canvas { ctx, _ in
                 let cx = w / 2
                 let cw = w * 0.30
-                let maxH = h * 0.46
+                let maxH = h * (c.isCompact ? 0.44 : 0.46)
                 let ch = maxH * (0.10 + 0.90 * c.remaining)
                 let topY = baseY - ch
                 let lit = c.remaining > 0.001
@@ -1602,7 +1604,7 @@ private struct CandleDial: View {
                 }
             }
 
-            VStack(spacing: 3) {
+            VStack(spacing: c.isCompact ? 1 : 3) {
                 Text(c.clock)
                     .font(Theme.clock(c.isCompact ? 22 : 26))
                     .foregroundStyle(Self.ink)
@@ -1610,7 +1612,8 @@ private struct CandleDial: View {
                     .lineLimit(1)
                 StatusLine(c: c, dot: 3.5)
             }
-            .position(x: w / 2, y: baseY + (h - baseY) / 2 + 4)
+            // 縮小模式提醒時，閃動的外框畫在輪廓裡面；文字要離底邊遠一點，不然「休息時間」會壓在外框上
+            .position(x: w / 2, y: baseY + (h - baseY) / 2 + (c.isCompact ? 0 : 4))
         }
         .frame(width: w, height: h)
     }
