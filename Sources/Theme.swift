@@ -174,7 +174,9 @@ struct RoundDots: View {
 enum Metrics {
     /// 高度要算進「結束並記下 N 分鐘」那一列（約 34pt）。
     /// 原本的 408 沒算到，專注滿半分鐘按鈕一出現，底部那列（今日 N、設定齒輪）就被擠出視窗。
-    static let full = CGSize(width: 320, height: 460)
+    /// 480：Liquid Glass 版每一列都給固定高度（上排 28、錶盤 224、任務欄 50、按鈕列 54、
+    /// 記下按鈕 36、底部玻璃列 36、上下內距 26），「結束並記下」出現時中間的 Spacer 還剩 26pt。
+    static let full = CGSize(width: 320, height: 480)
     static let compact = CGSize(width: 168, height: 168)
     static let morph = 0.26
     /// 提醒脈動的半週期（秒）

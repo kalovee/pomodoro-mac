@@ -49,13 +49,32 @@ struct ContentView: View {
         }
         // 視窗會比內容高出一個標題列，底色鋪滿整個視窗才不會出現接縫
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(prefs.compact ? Color.clear : Theme.ground)
+        .background {
+            if prefs.compact { Color.clear } else { GlowBackdrop(tint: Theme.accent(model.phase)) }
+        }
         .clipped()
         // 必須放在 .clipped() 之後：SwiftUI 會為標題列留一塊安全區，
         // 內容和底色只鋪在安全區內，最上面 20pt 會是沒畫到的透明帶。
         // 放在 clipped 前面的話會被它切回去。
         .ignoresSafeArea()
         .animation(.easeInOut(duration: Metrics.morph), value: prefs.compact)
+        .animation(.easeInOut(duration: 0.28), value: model.phase)
+    }
+}
+
+/// 完整模式的背景：底色上兩團靜態的光暈，給上面的玻璃控制項有東西可以折射。
+/// 刻意不用 .blur（模糊濾鏡每次重畫都要重算），也不做會動的光暈——只在換階段時跟著變色。
+private struct GlowBackdrop: View {
+    let tint: Color
+
+    var body: some View {
+        ZStack {
+            Theme.ground
+            RadialGradient(colors: [tint.opacity(0.20), tint.opacity(0)],
+                           center: UnitPoint(x: 0.12, y: 0.10), startRadius: 0, endRadius: 320)
+            RadialGradient(colors: [Color(hex: 0xF2A65A).opacity(0.14), Color(hex: 0xF2A65A).opacity(0)],
+                           center: UnitPoint(x: 0.92, y: 0.95), startRadius: 0, endRadius: 300)
+        }
     }
 }
 
@@ -66,27 +85,26 @@ private struct FullView: View {
     @EnvironmentObject var prefs: Prefs
     @StateObject private var ui = ViewState()
     @FocusState private var taskFocused: Bool
-    @Namespace private var modeNS
 
     private var tint: Color { Theme.accent(model.phase) }
 
     var body: some View {
         VStack(spacing: 0) {
+            // 高度預算見 Metrics.full：每一列都是固定高度，只有 Spacer 會伸縮
             topBar
             dial.padding(.top, 2)
-            taskField.padding(.top, 18)
+            taskField.padding(.top, 16)
             controls.padding(.top, 14)
             logProgress
             Spacer(minLength: 12)
-            Rectangle().fill(Theme.hairline).frame(height: 1)
-            footer.padding(.top, 12)
+            footer
         }
         .padding(.horizontal, 18)
         .padding(.top, 12)
-        .padding(.bottom, 16)
+        .padding(.bottom, 14)
         // 不寫死高度：拿到多少就用多少，視窗內容區跟設計值有落差時才不會被裁掉
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.ground)
+        // 底色和光暈畫在 ContentView 最外層，才會鋪到標題列那一塊
         .animation(.easeInOut(duration: 0.28), value: model.phase)
         .sheet(isPresented: $ui.showSettings) { SettingsView() }
         .sheet(isPresented: $ui.showHistory) { HistoryView() }
@@ -96,59 +114,49 @@ private struct FullView: View {
         .onChange(of: prefs.countdownMin) { model.syncDurationIfIdle() }
     }
 
-    // 上排：釘選 / 縮小。兩個都是「視窗怎麼待在桌面上」的控制，放在一起。
-    // 靠右擺，左上角留給系統的紅綠燈按鈕。
+    // 上排：模式選單在視窗正中間；釘選／縮小靠右。
+    // 兩層疊起來而不是排成一列，選單才是以整個視窗置中，不會被左邊紅綠燈的留白推偏。
     private var topBar: some View {
-        HStack(spacing: 2) {
-            // 左邊留給系統的紅綠燈按鈕
-            Spacer(minLength: 60)
+        ZStack {
             modePicker
-            Spacer(minLength: 8)
-            ghostButton(prefs.alwaysOnTop ? "pin.fill" : "pin",
-                        active: prefs.alwaysOnTop,
-                        tint: tint,
-                        help: prefs.alwaysOnTop ? "取消浮動" : "浮在最上層，全螢幕 App 上也看得到") {
-                prefs.alwaysOnTop.toggle()
-            }
-            ghostButton("arrow.down.right.and.arrow.up.left",
-                        active: false, tint: tint, help: "縮小成計時器") {
-                prefs.compact = true
+            HStack(spacing: 2) {
+                Spacer()
+                topButtons
             }
         }
-        .frame(height: 24)
+        .frame(height: 28)
     }
 
-    /// 番茄鐘／倒數／碼錶。選中的那一格底色會滑過去，而不是瞬間跳過去。
+    @ViewBuilder
+    private var topButtons: some View {
+        ghostButton(prefs.alwaysOnTop ? "pin.fill" : "pin",
+                    active: prefs.alwaysOnTop,
+                    tint: tint,
+                    help: prefs.alwaysOnTop ? "取消浮動" : "浮在最上層，全螢幕 App 上也看得到") {
+            prefs.alwaysOnTop.toggle()
+        }
+        ghostButton("arrow.down.right.and.arrow.up.left",
+                    active: false, tint: tint, help: "縮小成計時器") {
+            prefs.compact = true
+        }
+    }
+
+    /// 番茄鐘／倒數／碼錶。用系統的分段選單：macOS 26 會把它畫成 Liquid Glass，
+    /// 選中的那一格會滑過去。寬度固定 156pt，置中後左緣約在 x=82，避開紅綠燈。
     private var modePicker: some View {
-        HStack(spacing: 0) {
+        Picker("模式", selection: Binding(get: { prefs.timerMode },
+                                          set: { m in
+                                              taskFocused = false
+                                              model.setMode(m)
+                                          })) {
             ForEach(TimerMode.allCases) { m in
-                let on = prefs.timerMode == m
-                Button {
-                    taskFocused = false
-                    model.setMode(m)
-                } label: {
-                    Text(m.label)
-                        .font(.system(size: 11, weight: on ? .semibold : .regular))
-                        .foregroundStyle(on ? Theme.ink : Theme.muted)
-                        .padding(.horizontal, 9)
-                        .frame(height: 20)
-                        .background {
-                            if on {
-                                Capsule()
-                                    .fill(Theme.surface)
-                                    .shadow(color: .black.opacity(0.08), radius: 1, y: 0.5)
-                                    .matchedGeometryEffect(id: "mode", in: modeNS)
-                            }
-                        }
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressableStyle(scale: 0.94))
-                .help(m.note)
+                Text(m.label).tag(m)
             }
         }
-        .padding(2)
-        .background(Capsule().fill(Theme.fill))
-        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: prefs.timerMode)
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 156)
+        .help(prefs.timerMode.note)
     }
 
     private var dial: some View {
@@ -233,18 +241,16 @@ private struct FullView: View {
             .foregroundStyle(Theme.ink)
             .multilineTextAlignment(.center)
             .focused($taskFocused)
-            .padding(.vertical, 8)
             // 兩邊都留出選單圖示的寬度，文字才會保持置中、長字也不會壓到圖示
             .padding(.horizontal, 28)
-            .background(
-                RoundedRectangle(cornerRadius: 9)
-                    .fill(Theme.surface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 9)
-                            .stroke(taskFocused ? tint.opacity(0.55) : Theme.hairline,
-                                    lineWidth: taskFocused ? 1.5 : 1)
-                    )
+            .frame(height: 34)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+            // 聚焦時外加一圈階段色細框，看得出游標在這裡
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(tint.opacity(taskFocused ? 0.55 : 0), lineWidth: 1.5)
             )
+            .animation(.easeOut(duration: 0.15), value: taskFocused)
             .onSubmit { taskFocused = false }
             .overlay(alignment: .trailing) { recentTaskMenu }
     }
@@ -275,7 +281,10 @@ private struct FullView: View {
         }
     }
 
+    /// 三顆按鈕放在同一個玻璃容器裡，靠近時玻璃會融在一起。
+    /// 高度固定 40：按鈕樣式自己的內距不會把這一列撐高，高度預算才算得準。
     private var controls: some View {
+        GlassEffectContainer(spacing: 10) {
         HStack(spacing: 10) {
             circleButton("arrow.counterclockwise",
                          help: prefs.timerMode == .stopwatch ? "歸零" : "重設這一段") { model.reset() }
@@ -293,19 +302,20 @@ private struct FullView: View {
                 }
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
-                .frame(height: 38)
-                .background(Capsule().fill(tint))
-                .shadow(color: tint.opacity(0.35), radius: model.running ? 0 : 6, y: 2)
-                .animation(.easeOut(duration: 0.2), value: model.running)
+                .frame(height: 40)
+                .contentShape(Capsule())
             }
-            .buttonStyle(PressableStyle(scale: 0.96))
-            .hoverLift(1.02)
+            .buttonStyle(.plain)
+            // 染上階段色的玻璃；interactive 讓它按下會彈、滑鼠移上去會亮
+            .glassEffect(.regular.tint(tint).interactive(), in: .capsule)
             // ⌘↩ 交給選單列處理：縮小模式沒有這顆按鈕，
             // 放在選單才是兩種模式都有效，也不會兩邊搶同一組鍵。
             circleButton("forward.end.fill", help: "跳過這一段") { model.skip() }
                 .disabled(!model.canSkip)
                 .opacity(model.canSkip ? 1 : 0.35)
         }
+        }
+        .frame(height: 40)
     }
 
     /// 只有真的累積到一分鐘以上才出現。
@@ -316,14 +326,14 @@ private struct FullView: View {
         if model.canLogProgress {
             Button { model.logProgressAndBreak() } label: {
                 Text("結束並記下 \(model.elapsedMinutes) 分鐘")
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(.system(size: 11.5, weight: .semibold))
                     .foregroundStyle(tint)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(tint.opacity(0.12)))
+                    .padding(.horizontal, 14)
+                    .frame(height: 26)
+                    .contentShape(Capsule())
             }
-            .buttonStyle(PressableStyle())
-            .hoverLift(1.03)
+            .buttonStyle(.plain)
+            .glassEffect(.regular.tint(tint.opacity(0.12)).interactive(), in: .capsule)
             .help(prefs.timerMode == .stopwatch
                   ? "把這段時間記進紀錄，碼錶歸零"
                   : "把已經專注的時間記進紀錄，然後進入休息")
@@ -333,6 +343,7 @@ private struct FullView: View {
             Text("拖曳錶盤可以調整時間")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.muted.opacity(0.75))
+                .frame(height: 14)
                 .padding(.top, 14)
         }
     }
@@ -360,6 +371,11 @@ private struct FullView: View {
                 ui.showSettings = true
             }
         }
+        // 底部列本身是一條玻璃膠囊，取代原本的分隔線
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .frame(height: 36)
+        .glassEffect(.regular, in: .capsule)
     }
 
     private var durationText: String {
@@ -375,12 +391,11 @@ private struct FullView: View {
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.muted)
-                .frame(width: 38, height: 38)
-                .background(Circle().fill(Theme.fill))
+                .frame(width: 40, height: 40)
                 .contentShape(Circle())
         }
-        .buttonStyle(PressableStyle(scale: 0.88))
-        .hoverLift(1.08)
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
         .help(help)
     }
 
@@ -448,9 +463,11 @@ private struct CompactView: View {
             .scaleEffect(model.alerting && model.breath ? 0.96 : 1)
 
             // 滑鼠移上去才出現控制項，平常只剩計時器本身
-            HStack(spacing: 8) {
-                compactButton(model.running ? "pause.fill" : "play.fill") { model.toggle() }
-                compactButton("arrow.up.left.and.arrow.down.right") { prefs.compact = false }
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    compactButton(model.running ? "pause.fill" : "play.fill") { model.toggle() }
+                    compactButton("arrow.up.left.and.arrow.down.right") { prefs.compact = false }
+                }
             }
             .offset(y: style.dimsOnHover ? 0 : panel.height * 0.26)
             .opacity(ui.hovering ? 1 : 0)
@@ -539,11 +556,12 @@ private struct CompactView: View {
     private func compactButton(_ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 9.5, weight: .bold))
-                .foregroundStyle(Theme.muted)
-                .frame(width: 24, height: 24)
-                .background(Circle().fill(Theme.fill))
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Theme.ink)
+                .frame(width: 28, height: 28)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
     }
 }
