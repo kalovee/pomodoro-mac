@@ -85,6 +85,7 @@ private struct FullView: View {
     @EnvironmentObject var prefs: Prefs
     @StateObject private var ui = ViewState()
     @FocusState private var taskFocused: Bool
+    @Namespace private var modeNS
 
     private var tint: Color { Theme.accent(model.phase) }
 
@@ -141,22 +142,43 @@ private struct FullView: View {
         }
     }
 
-    /// 番茄鐘／倒數／碼錶。用系統的分段選單：macOS 26 會把它畫成 Liquid Glass，
-    /// 選中的那一格會滑過去。寬度固定 156pt，置中後左緣約在 x=82，避開紅綠燈。
+    /// 番茄鐘／倒數／碼錶，自己畫的玻璃膠囊選單。
+    ///
+    /// 不用系統的分段選單：它不照 .frame 給的寬度，會自己決定大小——同一份程式在不同情況下
+    /// 量到 163pt 和 187pt 都有，寬的那次左緣就壓到紅綠燈。這裡每一格固定 50pt，總寬 154pt，
+    /// 以視窗置中後左緣約在 x=83，離紅綠燈右緣（約 69）還有一段距離。
+    /// 選中那格跟開始鈕一樣：底下墊實色的階段色，視窗沒焦點時才不會被系統畫成灰色。
     private var modePicker: some View {
-        Picker("模式", selection: Binding(get: { prefs.timerMode },
-                                          set: { m in
-                                              taskFocused = false
-                                              model.setMode(m)
-                                          })) {
+        HStack(spacing: 0) {
             ForEach(TimerMode.allCases) { m in
-                Text(m.label).tag(m)
+                let on = prefs.timerMode == m
+                Button {
+                    taskFocused = false
+                    model.setMode(m)
+                } label: {
+                    Text(m.label)
+                        .font(.system(size: 12, weight: on ? .semibold : .regular))
+                        .foregroundStyle(on ? Color.white : Theme.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(width: 50, height: 24)
+                        .background {
+                            if on {
+                                Capsule()
+                                    .fill(tint)
+                                    .glassEffect(.clear.tint(tint).interactive(), in: .capsule)
+                                    .matchedGeometryEffect(id: "mode", in: modeNS)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help(m.note)
             }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(width: 156)
-        .help(prefs.timerMode.note)
+        .padding(2)
+        .glassEffect(.regular, in: .capsule)
+        .animation(.spring(response: 0.32, dampingFraction: 0.8), value: prefs.timerMode)
     }
 
     private var dial: some View {
