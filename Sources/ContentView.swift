@@ -306,8 +306,12 @@ private struct FullView: View {
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            // 染上階段色的玻璃；interactive 讓它按下會彈、滑鼠移上去會亮
-            .glassEffect(.regular.tint(tint).interactive(), in: .capsule)
+            // 底下墊一層實色的階段色，上面才是玻璃。
+            // 只靠 .tint 的話，視窗沒有焦點時系統會把染色玻璃畫成灰的，白字幾乎看不見——
+            // 而這是浮動面板，點按鈕不會搶焦點，平常幾乎都是沒焦點的狀態。
+            // 用 .clear 玻璃：邊緣比 .regular 乾淨，不會在紅色外面多一圈灰邊。
+            .background(Capsule().fill(tint))
+            .glassEffect(.clear.tint(tint).interactive(), in: .capsule)
             // ⌘↩ 交給選單列處理：縮小模式沒有這顆按鈕，
             // 放在選單才是兩種模式都有效，也不會兩邊搶同一組鍵。
             circleButton("forward.end.fill", help: "跳過這一段") { model.skip() }
