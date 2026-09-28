@@ -1589,8 +1589,8 @@ private struct CandleDial: View {
                         Gradient(colors: [Color(hex: 0xFFFBEA).opacity(flameAlpha), Color(hex: 0xFFD35A).opacity(flameAlpha),
                                           Color(hex: 0xFF8A2A).opacity(0.85 * flameAlpha)]),
                         center: CGPoint(x: fb.x, y: fb.y - fh * 0.28), startRadius: 0, endRadius: fh * 0.75))
-                    ctx.fill(Path(ellipseIn: CGRect(x: fb.x - fw * 0.35, y: fb.y - fh * 0.2, width: fw * 0.7, height: fh * 0.22)),
-                             with: .color(Color(hex: 0x5C8DFF).opacity(0.45 * flameAlpha)))
+                    ctx.fill(Path(ellipseIn: CGRect(x: fb.x - fw * 0.22, y: fb.y - fh * 0.13, width: fw * 0.44, height: fh * 0.13)),
+                             with: .color(Color(hex: 0x5C8DFF).opacity(0.28 * flameAlpha)))
                 } else {
                     // 燒完了：一縷煙
                     var smoke = Path()
@@ -1631,7 +1631,7 @@ private struct VinylDial: View {
         let w = size.width, h = size.height
         let R = min(w, h) / 2 - (c.isCompact ? 3 : 2)
         let center = CGPoint(x: w / 2, y: h / 2)
-        let labelR = R * 0.38
+        let labelR = R * 0.44
 
         ZStack {
             Canvas { ctx, _ in
@@ -1701,19 +1701,19 @@ private struct VinylDial: View {
                     center: CGPoint(x: pivot.x - R * 0.03, y: pivot.y - R * 0.03), startRadius: 0, endRadius: R * 0.1))
             }
 
-            VStack(spacing: 1) {
-                Text(c.clock)
-                    .font(.system(size: labelR * 0.42, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(Self.paper)
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(1)
-                Text(c.eyebrow)
-                    .font(.system(size: max(7, labelR * 0.2), weight: .semibold))
-                    .tracking(1)
-                    .foregroundStyle(Self.paper.opacity(0.75))
-            }
-            .frame(width: labelR * 1.7)
-            .position(center)
+            // 數字在中心孔上方、小字在下方，中心孔留在兩者之間，不會壓到冒號
+            Text(c.clock)
+                .font(.system(size: labelR * 0.44, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(Self.paper)
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+                .frame(width: labelR * 1.7)
+                .position(x: center.x, y: center.y - labelR * 0.36)
+            Text(c.eyebrow)
+                .font(.system(size: max(7, labelR * 0.2), weight: .semibold))
+                .tracking(1)
+                .foregroundStyle(Self.paper.opacity(0.75))
+                .position(x: center.x, y: center.y + labelR * 0.42)
         }
         .frame(width: w, height: h)
     }
