@@ -18,6 +18,14 @@ struct DialContext {
     var isCompact: Bool
     var hovering: Bool = false
     var running: Bool = false
+    /// 錶盤上方的小字（階段名稱、模式名稱或提醒文字），由 model 決定
+    var eyebrow: String
+    /// 碼錶往上數：秒針要順著秒數走，而不是倒過來
+    var countsUp: Bool = false
+    /// 只有番茄鐘有輪數，另外兩個模式不顯示輪數圓點
+    var showsRounds: Bool = true
+    /// 每開始新的一段 +1，沙漏靠它翻面
+    var segmentID: Int = 0
 
     var tint: Color { Theme.accent(phase) }
     /// 剩多少（0…1）。沙漏、水位、月相都表達這個，跟倒數數字同一個方向。
@@ -26,9 +34,10 @@ struct DialContext {
     var minutes: String { String(clock.split(separator: ":").first ?? "00") }
     var seconds: String { String(clock.split(separator: ":").last ?? "00") }
     /// 這一分鐘已經過了幾秒（倒數的秒數反過來），給秒針順時針走
-    var elapsedInMinute: Int { (60 - (Int(seconds) ?? 0)) % 60 }
-    /// 提醒中顯示「休息時間」／「該專注了」，平常顯示階段名稱
-    var eyebrow: String { alerting ? alertEyebrow(for: alertFinished) : phase.title }
+    var elapsedInMinute: Int {
+        let s = Int(seconds) ?? 0
+        return countsUp ? s : (60 - s) % 60
+    }
 
     @MainActor
     init(model: PomodoroModel, prefs: Prefs, isCompact: Bool, hovering: Bool = false) {
@@ -41,6 +50,10 @@ struct DialContext {
         roundInCycle = model.roundInCycle
         rounds = prefs.roundsPerLong
         running = model.running
+        eyebrow = model.eyebrow
+        countsUp = model.mode == .stopwatch
+        showsRounds = model.mode == .pomodoro
+        segmentID = model.segmentID
         self.isCompact = isCompact
         self.hovering = hovering
     }
@@ -60,6 +73,7 @@ struct DialContext {
         self.isCompact = isCompact
         self.hovering = hovering
         self.running = running
+        eyebrow = alerting ? alertEyebrow(for: alertFinished) : phase.title
     }
 
     /// 設定頁縮圖用的固定範例
@@ -188,7 +202,7 @@ private struct ClassicDial: View {
                             .tracking(1.5)
                             .foregroundStyle(c.tint)
                     } else {
-                        RoundDots(done: c.roundInCycle, total: c.rounds, tint: c.tint, dot: 4)
+                        StatusLine(c: c, dot: 4)
                     }
                 }
                 .offset(y: c.hovering ? -10 : 0)
@@ -210,7 +224,7 @@ private struct ClassicDial: View {
                             .font(Theme.caption)
                             .foregroundStyle(Theme.muted)
                     } else {
-                        RoundDots(done: c.roundInCycle, total: c.rounds, tint: c.tint)
+                        StatusLine(c: c, dot: 5)
                     }
                 }
             }
@@ -232,8 +246,14 @@ private struct StatusLine: View {
                 .font(Theme.eyebrow)
                 .tracking(1.5)
                 .foregroundStyle(color ?? c.tint)
-        } else {
+        } else if c.showsRounds {
             RoundDots(done: c.roundInCycle, total: c.rounds, tint: color ?? c.tint, dot: dot)
+        } else {
+            // 沒有輪數的模式改顯示模式名稱，位置和高度跟圓點差不多
+            Text(c.eyebrow)
+                .font(.system(size: 9.5, weight: .semibold))
+                .tracking(1.5)
+                .foregroundStyle((color ?? c.tint).opacity(0.8))
         }
     }
 }

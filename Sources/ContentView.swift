@@ -10,6 +10,8 @@ final class ViewState: ObservableObject {
     @Published var showSettings = false
     @Published var showHistory = false
     @Published var hovering = false
+    /// 拖曳錶盤設定時間時，目前指到的分鐘數；沒在拖就是 nil
+    @Published var dragMinutes: Int?
 }
 
 extension Notification.Name {
@@ -18,6 +20,10 @@ extension Notification.Name {
 }
 
 /// 提醒時錶盤該顯示的字。放在這裡是因為完整模式和縮小模式都要用。
+/// 完整模式錶盤區的寬度：視窗寬減掉左右內距。拖曳設定時間要用它找圓心。
+private let dialAreaWidth: CGFloat = Metrics.full.width - 36
+private let dialAreaHeight: CGFloat = 222
+
 func alertEyebrow(for finished: Phase?) -> String {
     finished == .work ? "休息時間" : "該專注了"
 }
@@ -53,6 +59,7 @@ private struct FullView: View {
     @EnvironmentObject var prefs: Prefs
     @StateObject private var ui = ViewState()
     @FocusState private var taskFocused: Bool
+    @Namespace private var modeNS
 
     private var tint: Color { Theme.accent(model.phase) }
 
@@ -79,13 +86,17 @@ private struct FullView: View {
         .onChange(of: prefs.workMin) { model.syncDurationIfIdle() }
         .onChange(of: prefs.shortMin) { model.syncDurationIfIdle() }
         .onChange(of: prefs.longMin) { model.syncDurationIfIdle() }
+        .onChange(of: prefs.countdownMin) { model.syncDurationIfIdle() }
     }
 
     // 上排：釘選 / 縮小。兩個都是「視窗怎麼待在桌面上」的控制，放在一起。
     // 靠右擺，左上角留給系統的紅綠燈按鈕。
     private var topBar: some View {
         HStack(spacing: 2) {
-            Spacer()
+            // 左邊留給系統的紅綠燈按鈕
+            Spacer(minLength: 60)
+            modePicker
+            Spacer(minLength: 8)
             ghostButton(prefs.alwaysOnTop ? "pin.fill" : "pin",
                         active: prefs.alwaysOnTop,
                         tint: tint,
@@ -97,7 +108,40 @@ private struct FullView: View {
                 prefs.compact = true
             }
         }
-        .frame(height: 22)
+        .frame(height: 24)
+    }
+
+    /// 番茄鐘／倒數／碼錶。選中的那一格底色會滑過去，而不是瞬間跳過去。
+    private var modePicker: some View {
+        HStack(spacing: 0) {
+            ForEach(TimerMode.allCases) { m in
+                let on = prefs.timerMode == m
+                Button {
+                    taskFocused = false
+                    model.setMode(m)
+                } label: {
+                    Text(m.label)
+                        .font(.system(size: 11, weight: on ? .semibold : .regular))
+                        .foregroundStyle(on ? Theme.ink : Theme.muted)
+                        .padding(.horizontal, 9)
+                        .frame(height: 20)
+                        .background {
+                            if on {
+                                Capsule()
+                                    .fill(Theme.surface)
+                                    .shadow(color: .black.opacity(0.08), radius: 1, y: 0.5)
+                                    .matchedGeometryEffect(id: "mode", in: modeNS)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressableStyle(scale: 0.94))
+                .help(m.note)
+            }
+        }
+        .padding(2)
+        .background(Capsule().fill(Theme.fill))
+        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: prefs.timerMode)
     }
 
     private var dial: some View {
@@ -121,10 +165,49 @@ private struct FullView: View {
                 // 有面板的風格內容不能超出面板——水位的水是整塊矩形，靠這裡切成圓的
                 .clipShape(style.showsPanelInFull ? style.silhouette : AnyShape(Rectangle()))
         }
-        .frame(height: 222)
+        .overlay {
+            CompletionBurst(trigger: model.completionCount, tint: tint,
+                            diameter: min(max(panel.width, panel.height) + 20, dialAreaHeight))
+        }
+        .overlay(alignment: .bottom) {
+            if let m = ui.dragMinutes {
+                Text("\(m) 分鐘")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(.regularMaterial))
+                    .overlay(Capsule().stroke(Theme.hairline, lineWidth: 1))
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+            }
+        }
+        .frame(width: dialAreaWidth, height: dialAreaHeight)
         .animation(.easeInOut(duration: Metrics.pulse), value: model.breath)
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: ui.dragMinutes == nil)
         .contentShape(Rectangle())
         .onTapGesture { if model.alerting { model.acknowledge() } }
+        // 像轉實體計時器一樣：從正上方順時針拖到幾分鐘就是幾分鐘，一分鐘一格
+        .gesture(
+            DragGesture(minimumDistance: 3)
+                .onChanged { v in
+                    guard model.canSetDurationByDrag else { return }
+                    let dx = v.location.x - dialAreaWidth / 2
+                    let dy = v.location.y - dialAreaHeight / 2
+                    var angle = atan2(Double(dx), Double(-dy))
+                    if angle < 0 { angle += 2 * .pi }
+                    var m = Int((angle / (2 * .pi) * 60).rounded())
+                    if m == 0 { m = 60 }
+                    if m != ui.dragMinutes {
+                        ui.dragMinutes = m
+                        model.setDurationByDrag(minutes: m)
+                        // 每跨一格給一下觸控板回饋，像旋鈕的段落感
+                        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                    }
+                }
+                .onEnded { _ in ui.dragMinutes = nil }
+        )
+        .help(model.canSetDurationByDrag ? "拖曳錶盤可以調整時間" : "")
     }
 
     private var taskField: some View {
@@ -178,7 +261,8 @@ private struct FullView: View {
 
     private var controls: some View {
         HStack(spacing: 10) {
-            circleButton("arrow.counterclockwise", help: "重設這一段") { model.reset() }
+            circleButton("arrow.counterclockwise",
+                         help: prefs.timerMode == .stopwatch ? "歸零" : "重設這一段") { model.reset() }
 
             Button {
                 taskFocused = false
@@ -187,6 +271,7 @@ private struct FullView: View {
                 HStack(spacing: 6) {
                     Image(systemName: model.running ? "pause.fill" : "play.fill")
                         .font(.system(size: 11, weight: .bold))
+                        .contentTransition(.symbolEffect(.replace))
                     Text(model.running ? "暫停" : "開始")
                         .font(.system(size: 13.5, weight: .semibold))
                 }
@@ -194,11 +279,16 @@ private struct FullView: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 38)
                 .background(Capsule().fill(tint))
+                .shadow(color: tint.opacity(0.35), radius: model.running ? 0 : 6, y: 2)
+                .animation(.easeOut(duration: 0.2), value: model.running)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableStyle(scale: 0.96))
+            .hoverLift(1.02)
             // ⌘↩ 交給選單列處理：縮小模式沒有這顆按鈕，
             // 放在選單才是兩種模式都有效，也不會兩邊搶同一組鍵。
             circleButton("forward.end.fill", help: "跳過這一段") { model.skip() }
+                .disabled(!model.canSkip)
+                .opacity(model.canSkip ? 1 : 0.35)
         }
     }
 
@@ -215,9 +305,18 @@ private struct FullView: View {
                     .padding(.vertical, 5)
                     .background(Capsule().fill(tint.opacity(0.12)))
             }
-            .buttonStyle(.plain)
-            .help("把已經專注的時間記進紀錄，然後進入休息")
+            .buttonStyle(PressableStyle())
+            .hoverLift(1.03)
+            .help(prefs.timerMode == .stopwatch
+                  ? "把這段時間記進紀錄，碼錶歸零"
+                  : "把已經專注的時間記進紀錄，然後進入休息")
             .padding(.top, 12)
+        } else if model.canSetDurationByDrag && ui.dragMinutes == nil {
+            // 閒置時告訴使用者錶盤可以拖。放在同一個位置，版面不會跳
+            Text("拖曳錶盤可以調整時間")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.muted.opacity(0.75))
+                .padding(.top, 14)
         }
     }
 
@@ -235,7 +334,7 @@ private struct FullView: View {
                         .foregroundStyle(Theme.muted)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableStyle(scale: 0.96))
             .help("查看完成紀錄")
 
             Spacer()
@@ -261,8 +360,10 @@ private struct FullView: View {
                 .foregroundStyle(Theme.muted)
                 .frame(width: 38, height: 38)
                 .background(Circle().fill(Theme.fill))
+                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle(scale: 0.88))
+        .hoverLift(1.08)
         .help(help)
     }
 
@@ -275,7 +376,8 @@ private struct FullView: View {
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle(scale: 0.85))
+        .hoverLift(1.12)
         .help(help)
     }
 }
@@ -322,6 +424,8 @@ private struct CompactView: View {
                     .clipShape(style.silhouette)
                     // 寬的、高的和指針式的風格沒有空位放按鈕，懸停時把錶面壓暗、按鈕疊在正中間
                     .opacity(ui.hovering && style.dimsOnHover ? 0.22 : 1)
+                CompletionBurst(trigger: model.completionCount, tint: tint,
+                                diameter: min(panel.width, panel.height) - 8)
             }
             // 只內縮不放大：外層有 .clipped()，放大的部分會被切在視窗邊緣
             .scaleEffect(model.alerting && model.breath ? 0.96 : 1)
@@ -356,11 +460,20 @@ private struct CompactView: View {
                 Divider()
             }
             Button(model.running ? "暫停" : "開始") { model.toggle() }
-            Button("重設這一段") { model.reset() }
+            Button(prefs.timerMode == .stopwatch ? "歸零" : "重設這一段") { model.reset() }
             if model.canLogProgress {
                 Button("結束並記下 \(model.elapsedMinutes) 分鐘") { model.logProgressAndBreak() }
             }
             Divider()
+            Menu("模式") {
+                ForEach(TimerMode.allCases) { m in
+                    Button {
+                        model.setMode(m)
+                    } label: {
+                        Text(prefs.timerMode == m ? "✓ \(m.label)" : m.label)
+                    }
+                }
+            }
             // 讀書時番茄鐘是縮小的，右鍵是最順手的切換入口
             Menu("時間長度") {
                 ForEach(Preset.all) { preset in
