@@ -722,15 +722,38 @@ private struct LCDDial: View {
 
 // MARK: - 沙漏
 
-/// 參考實體沙漏：上下木板加兩根側柱，玻璃是兩顆圓鼓的泡在細頸相接。
-/// 上面的沙面中間凹下去（沙從正中間漏走），下面的沙堆成圓錐——
-/// 平平的一條色塊看起來像進度條，不像沙。
+/// 沙漏翻面：新的一段開始時，滿沙的沙漏從倒放轉正
+private struct SpinFlip: ViewModifier {
+    let angle: Double
+    let anchor: UnitPoint
+    func body(content: Content) -> some View {
+        content.rotationEffect(.degrees(angle), anchor: anchor)
+    }
+}
+
+/// 寫實沙漏：車床木框、有厚度的玻璃、帶顆粒的真沙。
+///
+/// 沙用固定的沙色，不跟階段變色——紅色的沙看起來像液體。階段交給底下的輪數圓點。
+/// 所有顆粒、反光的位置都是固定的，每秒只跟著剩餘時間重畫一次，沒有粒子動畫。
 private struct HourglassDial: View {
     let c: DialContext
     let size: CGSize
 
-    /// 木框。深色模式調亮一點，不然會沉進背景
-    private static let wood = Theme.dyn(0x8C6D52, 0xA88B6E)
+    private static let woodLight = Theme.dyn(0xA67C58, 0xB8906B)
+    private static let woodDark = Theme.dyn(0x6B4930, 0x7D5A3E)
+    private static let sandLight = Color(hex: 0xEBD09C)
+    private static let sandDeep = Color(hex: 0xC99A5B)
+    private static let sandShade = Color(hex: 0x8F6638)
+
+    /// 沙粒：單位座標與大小，用固定種子的亂數產生一次
+    private static let grains: [(CGFloat, CGFloat, CGFloat, Bool)] = {
+        var seed: UInt64 = 0x5EED
+        func next() -> CGFloat {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return CGFloat((seed >> 33) % 10_000) / 10_000
+        }
+        return (0..<220).map { _ in (next(), next(), 0.5 + next() * 0.6, next() > 0.45) }
+    }()
 
     var body: some View {
         let w = size.width, h = size.height
@@ -739,101 +762,13 @@ private struct HourglassDial: View {
         let box = CGRect(x: (w - glassW) / 2, y: h * 0.05, width: glassW, height: glassH)
 
         ZStack {
-            Canvas { ctx, _ in
-                let plate = glassH * 0.04
-                let plateW = glassW * 1.26
-                let plateX = box.midX - plateW / 2
-                // 玻璃和木板之間留一點縫，玻璃才像是被夾住的
-                let body = box.insetBy(dx: glassW * 0.04, dy: plate + glassH * 0.012)
-                let glass = Self.glassPath(in: body)
-                let top = body.minY, neck = body.midY, bottom = body.maxY
-                let half = neck - top
-
-                // 側柱畫在玻璃後面
-                let post = max(2, w * 0.022)
-                for x in [plateX + plateW * 0.07, plateX + plateW * 0.93 - post] {
-                    ctx.fill(Path(roundedRect: CGRect(x: x, y: box.minY, width: post, height: glassH),
-                                  cornerRadius: post / 2),
-                             with: .color(Self.wood.opacity(0.75)))
-                }
-
-                ctx.fill(glass, with: .color(Theme.fill.opacity(0.35)))
-
-                let sand = GraphicsContext.Shading.linearGradient(
-                    Gradient(colors: [c.tint.opacity(0.72), c.tint]),
-                    startPoint: CGPoint(x: 0, y: top), endPoint: CGPoint(x: 0, y: bottom))
-
-                // 上泡越靠頸部越窄，剩一點點沙也還有高度；下泡底部寬，一開始堆得慢。
-                // 用次方近似體積，比線性的高度更像真的沙。
-                let topFill = pow(c.remaining, 0.6)
-                let pileFill = 1 - pow(1 - c.progress, 0.6)
-                let flowing = c.running && c.remaining > 0.001 && c.remaining < 0.999
-
-                var peakY = bottom
-                ctx.drawLayer { layer in
-                    layer.clip(to: glass)
-
-                    // 上面的沙＝剩下的時間，沙面中間凹下去
-                    if c.remaining > 0.001 {
-                        let level = neck - half * 0.82 * topFill
-                        let dip = flowing ? min(half * 0.10, (neck - level) * 0.5) : 0
-                        var p = Path()
-                        p.move(to: CGPoint(x: body.minX, y: level))
-                        p.addQuadCurve(to: CGPoint(x: body.maxX, y: level),
-                                       control: CGPoint(x: body.midX, y: level + 2 * dip))
-                        p.addLine(to: CGPoint(x: body.maxX, y: neck))
-                        p.addLine(to: CGPoint(x: body.minX, y: neck))
-                        p.closeSubpath()
-                        layer.fill(p, with: sand)
-                    }
-
-                    // 下面的沙＝已經過去的時間，堆成圓錐
-                    if c.progress > 0.001 {
-                        let base = bottom - half * 0.82 * pileFill
-                        let cone = min(half * 0.22, (bottom - base) + half * 0.08)
-                        peakY = max(neck + 2, base - cone / 2)
-                        let shoulder = base + cone / 2
-                        var p = Path()
-                        p.move(to: CGPoint(x: body.minX, y: bottom))
-                        p.addLine(to: CGPoint(x: body.minX, y: shoulder))
-                        p.addCurve(to: CGPoint(x: body.midX, y: peakY),
-                                   control1: CGPoint(x: body.minX + body.width * 0.28, y: shoulder),
-                                   control2: CGPoint(x: body.midX - body.width * 0.14, y: peakY))
-                        p.addCurve(to: CGPoint(x: body.maxX, y: shoulder),
-                                   control1: CGPoint(x: body.midX + body.width * 0.14, y: peakY),
-                                   control2: CGPoint(x: body.maxX - body.width * 0.28, y: shoulder))
-                        p.addLine(to: CGPoint(x: body.maxX, y: bottom))
-                        p.closeSubpath()
-                        layer.fill(p, with: sand)
-                    }
-
-                    // 頸部落下的細沙線，只在計時中出現；靜止不動（不做粒子）
-                    if flowing {
-                        layer.fill(Path(CGRect(x: body.midX - 0.6, y: neck,
-                                               width: 1.2, height: max(0, peakY - neck))),
-                                   with: .color(c.tint))
-                    }
-                }
-
-                // 玻璃反光：兩顆泡左上各一道細白弧
-                for (y0, y1) in [(top + half * 0.16, top + half * 0.60),
-                                 (neck + half * 0.40, bottom - half * 0.16)] {
-                    var hl = Path()
-                    hl.move(to: CGPoint(x: body.minX + body.width * 0.17, y: y0))
-                    hl.addQuadCurve(to: CGPoint(x: body.minX + body.width * 0.17, y: y1),
-                                    control: CGPoint(x: body.minX + body.width * 0.05, y: (y0 + y1) / 2))
-                    ctx.stroke(hl, with: .color(.white.opacity(0.4)),
-                               style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
-                }
-                ctx.stroke(glass, with: .color(Theme.ink.opacity(0.28)), lineWidth: 1.2)
-
-                // 上下木板
-                for y in [box.minY, box.maxY - plate] {
-                    ctx.fill(Path(roundedRect: CGRect(x: plateX, y: y, width: plateW, height: plate),
-                                  cornerRadius: plate / 2),
-                             with: .color(Self.wood))
-                }
-            }
+            Canvas { ctx, _ in draw(in: &ctx, box: box, w: w) }
+                // 每開始新的一段換一個 id：新的沙漏（上面滿沙）從倒放轉正，就像把沙漏翻過來
+                .id(c.segmentID)
+                .transition(.asymmetric(
+                    insertion: .modifier(active: SpinFlip(angle: -180, anchor: UnitPoint(x: 0.5, y: box.midY / h)),
+                                         identity: SpinFlip(angle: 0, anchor: UnitPoint(x: 0.5, y: box.midY / h))),
+                    removal: .identity))
 
             VStack(spacing: 3) {
                 Text(c.clock)
@@ -843,9 +778,176 @@ private struct HourglassDial: View {
                     .lineLimit(1)
                 StatusLine(c: c, dot: 3.5)
             }
-            .position(x: w / 2, y: box.maxY + (h - box.maxY) / 2)
+            .position(x: w / 2, y: box.maxY + (h - box.maxY) / 2 + 2)
         }
         .frame(width: w, height: h)
+        // 動畫只綁在 segmentID：一段開始時轉一次，轉完就停
+        .animation(.easeInOut(duration: 0.75), value: c.segmentID)
+    }
+
+    private func draw(in ctx: inout GraphicsContext, box: CGRect, w: CGFloat) {
+        let glassW = box.width, glassH = box.height
+        let plate = glassH * 0.045
+        let plateW = glassW * 1.26
+        let plateX = box.midX - plateW / 2
+        let body = box.insetBy(dx: glassW * 0.05, dy: plate + glassH * 0.014)
+        let glass = Self.glassPath(in: body)
+        let top = body.minY, neck = body.midY, bottom = body.maxY
+        let half = neck - top
+
+        // 桌面上的影子
+        ctx.drawLayer { l in
+            l.addFilter(.blur(radius: 2.5))
+            l.fill(Path(ellipseIn: CGRect(x: plateX - 2, y: box.maxY - plate * 0.2,
+                                          width: plateW + 4, height: plate * 1.4)),
+                   with: .color(.black.opacity(0.18)))
+        }
+
+        // 車床木柱：橫向亮暗漸層表現圓柱，上下各一顆珠狀凸環
+        let post = max(2.4, w * 0.026)
+        for cx in [plateX + plateW * 0.085, plateX + plateW * 0.915] {
+            let turned = GraphicsContext.Shading.linearGradient(
+                Gradient(colors: [Self.woodDark, Self.woodLight, Self.woodDark]),
+                startPoint: CGPoint(x: cx - post, y: 0), endPoint: CGPoint(x: cx + post, y: 0))
+            ctx.fill(Path(CGRect(x: cx - post / 2, y: box.minY, width: post, height: glassH)), with: turned)
+            for by in [box.minY + plate * 1.6, box.maxY - plate * 1.6] {
+                ctx.fill(Path(ellipseIn: CGRect(x: cx - post * 0.95, y: by - post * 0.55,
+                                                width: post * 1.9, height: post * 1.1)), with: turned)
+            }
+        }
+
+        // 玻璃本身：淡淡的底色，左亮右暗
+        ctx.fill(glass, with: .color(Theme.fill.opacity(0.28)))
+        ctx.fill(glass, with: .linearGradient(
+            Gradient(colors: [.white.opacity(0.30), .white.opacity(0.04), .black.opacity(0.05)]),
+            startPoint: CGPoint(x: body.minX, y: 0), endPoint: CGPoint(x: body.maxX, y: 0)))
+
+        let sand = GraphicsContext.Shading.linearGradient(
+            Gradient(colors: [Self.sandLight, Self.sandDeep]),
+            startPoint: CGPoint(x: 0, y: top), endPoint: CGPoint(x: 0, y: bottom))
+
+        // 上泡越靠頸部越窄，下泡底部寬：用次方近似體積，比線性高度更像真的沙
+        let topFill = pow(c.remaining, 0.6)
+        let pileFill = 1 - pow(1 - c.progress, 0.6)
+        let flowing = c.running && c.remaining > 0.001 && c.remaining < 0.999
+
+        var topSand = Path()
+        var pile = Path()
+        var peakY = bottom
+
+        if c.remaining > 0.001 {
+            // 上面的沙＝剩下的時間。漏的時候沙面是往頸部凹下去的漏斗
+            let level = neck - half * 0.84 * topFill
+            let dip = flowing ? min(half * 0.16, (neck - level) * 0.7) : 0
+            topSand.move(to: CGPoint(x: body.minX, y: level))
+            topSand.addQuadCurve(to: CGPoint(x: body.midX, y: level + dip),
+                                 control: CGPoint(x: body.midX - body.width * 0.22, y: level))
+            topSand.addQuadCurve(to: CGPoint(x: body.maxX, y: level),
+                                 control: CGPoint(x: body.midX + body.width * 0.22, y: level))
+            topSand.addLine(to: CGPoint(x: body.maxX, y: neck + 1))
+            topSand.addLine(to: CGPoint(x: body.minX, y: neck + 1))
+            topSand.closeSubpath()
+        }
+
+        if c.progress > 0.001 {
+            // 下面的沙＝已經過去的時間，堆成接近安息角的圓錐，頂端略圓
+            let base = bottom - half * 0.84 * pileFill
+            let cone = min(half * 0.30, (bottom - base) + half * 0.10)
+            peakY = max(neck + 3, base - cone * 0.6)
+            let shoulder = base + cone * 0.4
+            pile.move(to: CGPoint(x: body.minX, y: bottom))
+            pile.addLine(to: CGPoint(x: body.minX, y: shoulder))
+            pile.addQuadCurve(to: CGPoint(x: body.midX - 2.5, y: peakY + 1.2),
+                              control: CGPoint(x: body.midX - body.width * 0.24, y: peakY + cone * 0.38))
+            pile.addQuadCurve(to: CGPoint(x: body.midX + 2.5, y: peakY + 1.2),
+                              control: CGPoint(x: body.midX, y: peakY - 0.8))
+            pile.addQuadCurve(to: CGPoint(x: body.maxX, y: shoulder),
+                              control: CGPoint(x: body.midX + body.width * 0.24, y: peakY + cone * 0.38))
+            pile.addLine(to: CGPoint(x: body.maxX, y: bottom))
+            pile.closeSubpath()
+        }
+
+        ctx.drawLayer { layer in
+            layer.clip(to: glass)
+            for p in [topSand, pile] where !p.isEmpty {
+                layer.fill(p, with: sand)
+                // 沙堆左邊受光、右邊背光
+                layer.fill(p, with: .linearGradient(
+                    Gradient(colors: [.white.opacity(0.14), .clear, .black.opacity(0.10)]),
+                    startPoint: CGPoint(x: body.minX, y: 0), endPoint: CGPoint(x: body.maxX, y: 0)))
+                // 顆粒：深淺兩種細點，只畫在沙裡
+                layer.drawLayer { g in
+                    g.clip(to: p)
+                    var dark = Path(), light = Path()
+                    for (gx, gy, r, isDark) in Self.grains {
+                        let pt = CGRect(x: body.minX + gx * body.width, y: top + gy * body.height,
+                                        width: r, height: r)
+                        if isDark { dark.addEllipse(in: pt) } else { light.addEllipse(in: pt) }
+                    }
+                    g.fill(dark, with: .color(Self.sandShade.opacity(0.45)))
+                    g.fill(light, with: .color(.white.opacity(0.45)))
+                }
+            }
+            // 上層沙面的受光邊
+            if !topSand.isEmpty {
+                layer.stroke(topSand, with: .color(.white.opacity(0.25)), lineWidth: 0.6)
+            }
+
+            // 沙流：一條細線加幾顆沿線的沙粒，落點濺起幾顆
+            if flowing {
+                layer.fill(Path(CGRect(x: body.midX - 0.55, y: neck, width: 1.1, height: max(0, peakY - neck))),
+                           with: .color(Self.sandDeep))
+                var bits = Path()
+                let span = max(0, peakY - neck)
+                for (i, dx) in [-0.9, 0.8, -0.6, 1.0, -1.1].enumerated() {
+                    let y = neck + span * CGFloat(i + 1) / 6
+                    bits.addEllipse(in: CGRect(x: body.midX + CGFloat(dx) - 0.5, y: y, width: 1, height: 1))
+                }
+                for (dx, dy) in [(-3.0, -1.2), (2.6, -0.8), (-1.6, -2.2), (3.4, -2.0)] {
+                    bits.addEllipse(in: CGRect(x: body.midX + CGFloat(dx), y: peakY + CGFloat(dy), width: 1.1, height: 1.1))
+                }
+                layer.fill(bits, with: .color(Self.sandDeep))
+            }
+        }
+
+        // 玻璃的反光：左邊一長條、右邊一短條、左上一個亮點
+        for (y0, y1) in [(top + half * 0.14, top + half * 0.66), (neck + half * 0.34, bottom - half * 0.14)] {
+            var hl = Path()
+            hl.move(to: CGPoint(x: body.minX + body.width * 0.15, y: y0))
+            hl.addQuadCurve(to: CGPoint(x: body.minX + body.width * 0.16, y: y1),
+                            control: CGPoint(x: body.minX + body.width * 0.03, y: (y0 + y1) / 2))
+            ctx.stroke(hl, with: .color(.white.opacity(0.6)), style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+            var rim = Path()
+            rim.move(to: CGPoint(x: body.maxX - body.width * 0.12, y: y0 + (y1 - y0) * 0.25))
+            rim.addQuadCurve(to: CGPoint(x: body.maxX - body.width * 0.13, y: y0 + (y1 - y0) * 0.7),
+                             control: CGPoint(x: body.maxX - body.width * 0.04, y: (y0 + y1) / 2))
+            ctx.stroke(rim, with: .color(.white.opacity(0.22)), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+        }
+        ctx.fill(Path(ellipseIn: circleRect(CGPoint(x: body.minX + body.width * 0.26, y: top + half * 0.12), 1.3)),
+                 with: .color(.white.opacity(0.8)))
+
+        // 玻璃輪廓：外面一圈深的、疊一條細亮線，看起來有厚度
+        ctx.stroke(glass, with: .color(Theme.ink.opacity(0.30)), lineWidth: 1.5)
+        ctx.stroke(glass, with: .color(.white.opacity(0.35)), lineWidth: 0.5)
+        // 頸部的細環
+        ctx.fill(Path(roundedRect: CGRect(x: body.midX - body.width * 0.09, y: neck - 1.2,
+                                          width: body.width * 0.18, height: 2.4), cornerRadius: 1.2),
+                 with: .color(Theme.ink.opacity(0.18)))
+
+        // 上下木板：上亮下暗，中間一條木紋，上緣一道受光
+        for (i, y) in [box.minY, box.maxY - plate].enumerated() {
+            let r = CGRect(x: plateX, y: y, width: plateW, height: plate)
+            ctx.fill(Path(roundedRect: r, cornerRadius: plate * 0.35),
+                     with: .linearGradient(Gradient(colors: [Self.woodLight, Self.woodDark]),
+                                           startPoint: CGPoint(x: 0, y: r.minY), endPoint: CGPoint(x: 0, y: r.maxY)))
+            ctx.fill(Path(CGRect(x: r.minX + plate * 0.4, y: r.minY + 0.6, width: r.width - plate * 0.8, height: 0.7)),
+                     with: .color(.white.opacity(0.28)))
+            var grain = Path()
+            grain.move(to: CGPoint(x: r.minX + r.width * 0.12, y: r.midY + 0.3))
+            grain.addQuadCurve(to: CGPoint(x: r.maxX - r.width * 0.15, y: r.midY - 0.2),
+                               control: CGPoint(x: r.midX, y: r.midY + (i == 0 ? 0.9 : -0.9)))
+            ctx.stroke(grain, with: .color(Self.woodDark.opacity(0.45)), lineWidth: 0.5)
+        }
     }
 
     /// 兩顆圓鼓的玻璃泡：口比肚子窄一點，肚子鼓出去再收進細頸。
@@ -853,9 +955,9 @@ private struct HourglassDial: View {
     static func glassPath(in r: CGRect) -> Path {
         let half = r.width / 2
         let q = r.midY - r.minY
-        let lip = 0.76                // 泡口寬度（相對於最寬處）
-        let neck = 0.10               // 頸部寬度
-        func pt(_ sx: Double, _ y: CGFloat) -> CGPoint { CGPoint(x: r.midX + half * sx, y: y) }
+        let lip = 0.74                // 泡口寬度（相對於最寬處）
+        let neck = 0.07               // 頸部寬度
+        func pt(_ sx: Double, _ y: CGFloat) -> CGPoint { CGPoint(x: r.midX + half * CGFloat(sx), y: y) }
 
         var p = Path()
         p.move(to: pt(-lip, r.minY))
@@ -869,11 +971,11 @@ private struct HourglassDial: View {
                        control1: pt(s * (lip + (1 - lip) * 0.7), y0),
                        control2: pt(s, y0 + d * 0.12))
             p.addCurve(to: pt(s * neck, r.midY),
-                       control1: pt(s, y0 + d * 0.78),
-                       control2: pt(s * neck, r.midY - d * 0.22))
+                       control1: pt(s, y0 + d * 0.80),
+                       control2: pt(s * neck, r.midY - d * 0.20))
             p.addCurve(to: pt(s, y1 - d * 0.40),
-                       control1: pt(s * neck, r.midY + d * 0.22),
-                       control2: pt(s, y1 - d * 0.78))
+                       control1: pt(s * neck, r.midY + d * 0.20),
+                       control2: pt(s, y1 - d * 0.80))
             p.addCurve(to: pt(s * lip, y1),
                        control1: pt(s, y1 - d * 0.12),
                        control2: pt(s * (lip + (1 - lip) * 0.7), y1))

@@ -30,7 +30,7 @@ enum DialStyle: String, CaseIterable, Identifiable {
         case .pixel:     return "8-bit 掌機的四階綠，附 HP 條"
         case .flip:      return "分鐘變的時候翻一頁"
         case .lcd:       return "七段數字，右上角是輪數"
-        case .hourglass: return "上面的沙就是剩下的時間"
+        case .hourglass: return "木框玻璃與真沙，新的一段會翻面"
         case .moon:      return "由滿月慢慢缺成新月"
         case .water:     return "兩道波浪，淹到的數字反白"
         case .bauhaus:   return "紅圓扇形，四分之一圓記輪數"
