@@ -7,8 +7,10 @@ PDF or a book filling the display.
 **Highlights**
 
 - A floating `NSPanel` that survives other apps' full-screen Spaces without stealing focus
-- 10 dial styles — classic ticks, 8-bit pixel, flip clock, LCD, hourglass, moon phase,
-  water level, Bauhaus, minimal ring, station clock — and the floating window takes each one's shape
+- 13 dial styles — classic ticks, 8-bit pixel, flip clock, LCD, hourglass, moon phase,
+  water level, Bauhaus, minimal ring, station clock, candle, vinyl record, Nixie tubes —
+  and the floating window takes each one's shape
+- Three timer modes: pomodoro cycle, one-off countdown, and stopwatch
 - An alert you can't miss: 20 built-in sounds (plus your own from `~/Library/Sounds`),
   configurable repeat count or ring-until-dismissed, a dial that keeps pulsing until
   acknowledged, and an optional full-screen break mask
@@ -65,9 +67,17 @@ Every push is compiled on macOS by GitHub Actions (`.github/workflows/build.yml`
 
 ## 功能
 
-- **十種錶盤風格**（詳見下方「錶盤風格」）：經典刻度、像素、翻頁鐘、LCD 電子錶、沙漏、月相、
-  水位、包浩斯、極簡環、車站鐘。設定最上方有縮圖牆可以點選，縮小模式按右鍵 →「風格」也能換。
+- **十三種錶盤風格**（詳見下方「錶盤風格」）：經典刻度、像素、翻頁鐘、LCD 電子錶、沙漏、月相、
+  水位、包浩斯、極簡環、車站鐘、蠟燭、黑膠唱片、輝光管。設定最上方有縮圖牆可以點選，縮小模式按右鍵 →「風格」也能換。
   縮小模式的**形狀跟著風格走**：像素是方的、翻頁鐘和 LCD 是寬的、沙漏是高的
+- **三種計時模式**（完整模式上排切換，縮小模式右鍵 →「模式」）：
+  - 番茄鐘：專注與休息輪流，完成的專注會記進紀錄
+  - 倒數：設一個時間，到了就提醒；不記紀錄、不開休息遮罩
+  - 碼錶：從零往上數，按「結束並記下 N 分鐘」存進紀錄後歸零
+- **拖曳錶盤設定時間**：完整模式沒在計時時，在錶盤上從正上方順時針拖到幾分鐘就是幾分鐘（1–60），
+  一分鐘一格，觸控板有段落回饋
+- **有手感的介面**：按鈕按下會縮一下、滑鼠移上去會微微放大；完成一段時錶盤會往外擴散一圈光環。
+  這些動畫都只在操作或完成的那一刻跑，跑完就停，不影響計時中的效能
 - **時間組合預設**：25/5、30/10、50/10、90/20，一鍵換掉專注／短休／長休／輪數。
   三個入口都可以切：設定裡的膠囊按鈕、選單列「計時」（⌘1–⌘4）、
   縮小模式在圓盤上按右鍵 →「時間長度」
@@ -141,12 +151,15 @@ Every push is compiled on macOS by GitHub Actions (`.github/workflows/build.yml`
 | 像素 | 160 方 | 外框一圈 60 個像素方塊，剩下的亮；數字下一條 10 格 HP 條 | 番茄圖示換成咖啡杯 |
 | 翻頁鐘 | 232×112 | 卡片下方細線；**分鐘變的時候翻一頁**，秒數就地換字。卡片上下半明度不同、轉軸縫有亮邊、角落印「分」「秒」 | 角落小字 BREAK |
 | LCD 電子錶 | 212×112 | 帶括號的分段條；沒亮的段淡淡留著；右上角小七段顯示輪數，錶殼兩側有按鍵 | 液晶上的「短休／長休」段亮起 |
-| 沙漏 | 132×184 | 上半部的沙＝剩下的時間，沙面中間凹陷、下面堆成圓錐 | 換階段色 |
+| 沙漏 | 132×184 | 上半部的沙＝剩下的時間。車床木框、有厚度的玻璃、帶顆粒的真沙；新的一段開始時整個沙漏翻面 | 底下的輪數圓點 |
 | 月相 | 168 圓 | 由滿月慢慢缺成新月 | 換階段色 |
 | 水位 | 168 圓 | 水位＝剩下的時間，兩道波浪，淹到的數字反白 | 換階段色 |
 | 包浩斯 | 164 方 | 紅圓裡的扇形隨時間收縮；右上四片四分之一圓記輪數 | 黑帶上一個藍色半圓 |
 | 極簡環 | 168 圓 | 圓頭粗弧往回縮，末端一顆圓鈕 | 換階段色 |
 | 車站鐘 | 168 圓 | 分針一圈＝這一段的長度，外緣紅色細弧＝剩下的時間，紅色秒針每秒跳一格 | 錶面小字「休息」 |
+| 蠟燭 | 132×184 | 蠟燭高度＝剩下的時間，燭淚跟著變短；暫停時火焰變暗，燒完剩一縷煙 | 底下的輪數圓點 |
+| 黑膠唱片 | 168 圓 | 唱臂從外圈往內走＝進度，播過的外圈變暗；唱片不轉 | 標籤上的小字 |
+| 輝光管 | 232×112 | 玻璃管裡的橘色發光數字，底座一排小燈＝剩下的時間 | 底座右邊的小字 |
 
 - **進度一律表示「剩多少」**，跟倒數的數字同一個方向：沙往下流、水位下降、月亮由滿到缺。
 - **有自己配色身分的風格不改色**（像素、翻頁鐘、LCD、包浩斯、車站鐘），休息時改用小標記區分。

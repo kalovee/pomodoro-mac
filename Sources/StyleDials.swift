@@ -105,6 +105,9 @@ struct StyledDial: View {
         case .bauhaus:   BauhausDial(c: context, size: size)
         case .minimal:   MinimalDial(c: context, size: size)
         case .station:   StationDial(c: context, size: size)
+        case .candle:    CandleDial(c: context, size: size)
+        case .vinyl:     VinylDial(c: context, size: size)
+        case .nixie:     NixieDial(c: context, size: size)
         }
     }
 }
@@ -1478,5 +1481,357 @@ private struct StationDial: View {
             .font(.custom("Helvetica-Bold", size: r * 0.17))
             .foregroundStyle(Self.ink)
             .offset(x: r * 0.60 * CGFloat(sin(a)), y: -r * 0.60 * CGFloat(cos(a)))
+    }
+}
+
+// MARK: - 蠟燭
+
+/// 蠟燭高度＝剩下的時間。燭淚的形狀是固定的，蠟燭燒短了就一起變短。
+/// 火焰是靜態的漸層水滴，不閃爍（閃爍就是常駐動畫）；暫停時火焰暗一點，燒完只剩一縷煙。
+private struct CandleDial: View {
+    let c: DialContext
+    let size: CGSize
+
+    private static let waxHi = Color(hex: 0xFFF8EA)
+    private static let waxMid = Color(hex: 0xEADFC6)
+    private static let waxLo = Color(hex: 0xCDBC98)
+    private static let ink = Color(hex: 0xF3E9D8)
+    /// 燭淚：沿寬度的位置、長度（相對於燭身寬）
+    private static let drips: [(CGFloat, CGFloat)] = [(0.12, 0.9), (0.34, 0.45), (0.71, 1.25), (0.9, 0.6)]
+
+    var body: some View {
+        let w = size.width, h = size.height
+        let baseY = h * (c.isCompact ? 0.70 : 0.72)
+
+        ZStack {
+            Canvas { ctx, _ in
+                let cx = w / 2
+                let cw = w * 0.30
+                let maxH = h * 0.46
+                let ch = maxH * (0.10 + 0.90 * c.remaining)
+                let topY = baseY - ch
+                let lit = c.remaining > 0.001
+                let flameAlpha = c.running ? 1.0 : 0.7
+
+                // 燭光映在牆上
+                if lit {
+                    ctx.fill(Path(CGRect(x: 0, y: 0, width: w, height: h)),
+                             with: .radialGradient(Gradient(colors: [Color(hex: 0xFFB347).opacity(0.28 * flameAlpha), .clear]),
+                                                   center: CGPoint(x: cx, y: topY - w * 0.1),
+                                                   startRadius: 0, endRadius: w * 0.75))
+                }
+
+                // 燭台：黃銅盤
+                let dish = CGRect(x: cx - w * 0.34, y: baseY - w * 0.05, width: w * 0.68, height: w * 0.12)
+                ctx.fill(Path(ellipseIn: dish.offsetBy(dx: 0, dy: w * 0.02)), with: .color(.black.opacity(0.35)))
+                ctx.fill(Path(ellipseIn: dish), with: .linearGradient(
+                    Gradient(colors: [Color(hex: 0xE2B866), Color(hex: 0x9A7132)]),
+                    startPoint: CGPoint(x: dish.minX, y: dish.minY), endPoint: CGPoint(x: dish.maxX, y: dish.maxY)))
+                ctx.fill(Path(ellipseIn: dish.insetBy(dx: dish.width * 0.12, dy: dish.height * 0.22)),
+                         with: .color(Color(hex: 0x6F5020).opacity(0.5)))
+
+                // 燭身：橫向亮暗漸層表現圓柱
+                let body = CGRect(x: cx - cw / 2, y: topY, width: cw, height: baseY - topY)
+                let wax = GraphicsContext.Shading.linearGradient(
+                    Gradient(colors: [Self.waxLo, Self.waxHi, Self.waxMid, Self.waxLo]),
+                    startPoint: CGPoint(x: body.minX, y: 0), endPoint: CGPoint(x: body.maxX, y: 0))
+                ctx.fill(Path(body), with: wax)
+                // 靠近火焰的蠟透著光
+                if lit {
+                    ctx.fill(Path(CGRect(x: body.minX, y: topY, width: cw, height: min(ch, cw * 0.9))),
+                             with: .linearGradient(Gradient(colors: [Color(hex: 0xFFD27A).opacity(0.35 * flameAlpha), .clear]),
+                                                   startPoint: CGPoint(x: 0, y: topY), endPoint: CGPoint(x: 0, y: topY + cw * 0.9)))
+                }
+
+                // 燭淚：從頂端往下流，末端一顆圓滴
+                var drips = Path()
+                for (fx, len) in Self.drips {
+                    let x = body.minX + cw * fx
+                    let L = min(ch * 0.7, cw * len)
+                    let dw = cw * 0.11
+                    drips.addRoundedRect(in: CGRect(x: x - dw / 2, y: topY, width: dw, height: L),
+                                         cornerSize: CGSize(width: dw / 2, height: dw / 2))
+                    drips.addEllipse(in: CGRect(x: x - dw * 0.75, y: topY + L - dw * 1.2, width: dw * 1.5, height: dw * 1.6))
+                }
+                ctx.fill(drips, with: wax)
+                ctx.fill(drips, with: .color(.white.opacity(0.12)))
+
+                // 頂端：融化的蠟池
+                let pool = CGRect(x: body.minX, y: topY - cw * 0.12, width: cw, height: cw * 0.26)
+                ctx.fill(Path(ellipseIn: pool), with: .color(Self.waxMid))
+                ctx.fill(Path(ellipseIn: pool.insetBy(dx: cw * 0.14, dy: pool.height * 0.22)),
+                         with: .color(Color(hex: 0xF7E3B0).opacity(lit ? 0.9 : 0.5)))
+
+                // 燭芯
+                var wick = Path()
+                wick.move(to: CGPoint(x: cx, y: topY))
+                wick.addQuadCurve(to: CGPoint(x: cx + 1, y: topY - w * 0.055), control: CGPoint(x: cx - 1.2, y: topY - w * 0.03))
+                ctx.stroke(wick, with: .color(Color(hex: 0x2A1E16)), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+
+                if lit {
+                    // 火焰：水滴形，外焰橘、內焰白黃、底部一點藍
+                    let fb = CGPoint(x: cx + 0.5, y: topY - w * 0.035)
+                    let fh = w * 0.19, fw = w * 0.075
+                    var flame = Path()
+                    flame.move(to: CGPoint(x: fb.x, y: fb.y - fh))
+                    flame.addCurve(to: CGPoint(x: fb.x, y: fb.y),
+                                   control1: CGPoint(x: fb.x + fw * 0.35, y: fb.y - fh * 0.62),
+                                   control2: CGPoint(x: fb.x + fw * 1.25, y: fb.y - fh * 0.05))
+                    flame.addCurve(to: CGPoint(x: fb.x, y: fb.y - fh),
+                                   control1: CGPoint(x: fb.x - fw * 1.25, y: fb.y - fh * 0.05),
+                                   control2: CGPoint(x: fb.x - fw * 0.35, y: fb.y - fh * 0.62))
+                    flame.closeSubpath()
+                    ctx.drawLayer { l in
+                        l.addFilter(.blur(radius: 3))
+                        l.fill(flame, with: .color(Color(hex: 0xFF8A2A).opacity(0.7 * flameAlpha)))
+                    }
+                    ctx.fill(flame, with: .radialGradient(
+                        Gradient(colors: [Color(hex: 0xFFFBEA).opacity(flameAlpha), Color(hex: 0xFFD35A).opacity(flameAlpha),
+                                          Color(hex: 0xFF8A2A).opacity(0.85 * flameAlpha)]),
+                        center: CGPoint(x: fb.x, y: fb.y - fh * 0.28), startRadius: 0, endRadius: fh * 0.75))
+                    ctx.fill(Path(ellipseIn: CGRect(x: fb.x - fw * 0.35, y: fb.y - fh * 0.2, width: fw * 0.7, height: fh * 0.22)),
+                             with: .color(Color(hex: 0x5C8DFF).opacity(0.45 * flameAlpha)))
+                } else {
+                    // 燒完了：一縷煙
+                    var smoke = Path()
+                    smoke.move(to: CGPoint(x: cx + 1, y: topY - w * 0.06))
+                    smoke.addCurve(to: CGPoint(x: cx + 2, y: topY - w * 0.32),
+                                   control1: CGPoint(x: cx + 7, y: topY - w * 0.14),
+                                   control2: CGPoint(x: cx - 6, y: topY - w * 0.22))
+                    ctx.stroke(smoke, with: .color(.white.opacity(0.25)), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                }
+            }
+
+            VStack(spacing: 3) {
+                Text(c.clock)
+                    .font(Theme.clock(c.isCompact ? 22 : 26))
+                    .foregroundStyle(Self.ink)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                StatusLine(c: c, dot: 3.5)
+            }
+            .position(x: w / 2, y: baseY + (h - baseY) / 2 + 4)
+        }
+        .frame(width: w, height: h)
+    }
+}
+
+// MARK: - 黑膠唱片
+
+/// 唱臂從外圈往內移＝進度，走到標籤邊就是這一段結束。
+/// 唱片不轉：轉動是常駐動畫，浮在全螢幕 App 上會一直重畫。
+private struct VinylDial: View {
+    let c: DialContext
+    let size: CGSize
+
+    private static let label = Color(hex: 0xC8452F)
+    private static let paper = Color(hex: 0xF6EBDD)
+
+    var body: some View {
+        let w = size.width, h = size.height
+        let R = min(w, h) / 2 - (c.isCompact ? 3 : 2)
+        let center = CGPoint(x: w / 2, y: h / 2)
+        let labelR = R * 0.38
+
+        ZStack {
+            Canvas { ctx, _ in
+                // 唱片本體
+                ctx.fill(Path(ellipseIn: circleRect(center, R)), with: .radialGradient(
+                    Gradient(colors: [Color(hex: 0x262626), Color(hex: 0x0D0D0D)]),
+                    center: center, startRadius: labelR, endRadius: R))
+
+                // 溝紋：一條路徑畫完
+                var grooves = Path()
+                var gr = labelR + R * 0.05
+                while gr < R * 0.97 {
+                    grooves.addEllipse(in: circleRect(center, gr))
+                    gr += max(1.8, R * 0.028)
+                }
+                ctx.stroke(grooves, with: .color(.white.opacity(0.045)), lineWidth: 0.5)
+
+                // 光澤：左上和右下兩道反光
+                for start in [0.58, 0.08] {
+                    ctx.fill(sector(center: center, radius: R * 0.97, from: start).intersection(
+                        pie(center: center, radius: R * 0.97, fraction: start + 0.07)),
+                             with: .color(.white.opacity(0.07)))
+                }
+
+                // 已經播過的外圈稍微暗一點
+                let playR = R * 0.95 - (R * 0.95 - labelR * 1.08) * c.progress
+                if c.progress > 0.002 {
+                    var played = Path(ellipseIn: circleRect(center, R * 0.96))
+                    played.addEllipse(in: circleRect(center, playR))
+                    ctx.fill(played, with: .color(.black.opacity(0.28)), style: FillStyle(eoFill: true))
+                }
+
+                // 標籤與中心孔
+                ctx.fill(Path(ellipseIn: circleRect(center, labelR)), with: .color(Self.label))
+                ctx.stroke(Path(ellipseIn: circleRect(center, labelR * 0.93)),
+                           with: .color(Self.paper.opacity(0.35)), lineWidth: 0.6)
+                ctx.fill(Path(ellipseIn: circleRect(center, max(1.8, R * 0.025))), with: .color(Color(hex: 0x111111)))
+
+                // 唱臂：支點在右上，唱針落在半徑 playR 的地方（兩圓交點，取右下那一個）
+                let pivot = CGPoint(x: center.x + R * 0.62, y: center.y - R * 0.62)
+                let L = R * 0.95
+                let px = pivot.x - center.x, py = pivot.y - center.y
+                let d = (px * px + py * py).squareRoot()
+                let a = (playR * playR - L * L + d * d) / (2 * d)
+                let hh = max(0, playR * playR - a * a).squareRoot()
+                let needle = CGPoint(x: center.x + a * px / d - hh * py / d,
+                                     y: center.y + a * py / d + hh * px / d)
+
+                var arm = Path()
+                arm.move(to: CGPoint(x: pivot.x + (pivot.x - needle.x) * 0.12, y: pivot.y + (pivot.y - needle.y) * 0.12))
+                arm.addLine(to: needle)
+                ctx.stroke(arm.applying(CGAffineTransform(translationX: 1.5, y: 2)),
+                           with: .color(.black.opacity(0.45)), style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
+                ctx.stroke(arm, with: .linearGradient(Gradient(colors: [Color(hex: 0xF0F0F0), Color(hex: 0x9C9C9C)]),
+                                                      startPoint: pivot, endPoint: needle),
+                           style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                // 唱頭
+                let angle = atan2(Double(needle.y - pivot.y), Double(needle.x - pivot.x))
+                let head = Path(roundedRect: CGRect(x: -R * 0.06, y: -R * 0.035, width: R * 0.12, height: R * 0.07),
+                                cornerRadius: 1.5)
+                    .applying(CGAffineTransform(rotationAngle: angle))
+                    .applying(CGAffineTransform(translationX: needle.x, y: needle.y))
+                ctx.fill(head, with: .color(Color(hex: 0xD8D8D8)))
+                // 支點
+                ctx.fill(Path(ellipseIn: circleRect(pivot, R * 0.09)), with: .radialGradient(
+                    Gradient(colors: [Color(hex: 0xF4F4F4), Color(hex: 0x7A7A7A)]),
+                    center: CGPoint(x: pivot.x - R * 0.03, y: pivot.y - R * 0.03), startRadius: 0, endRadius: R * 0.1))
+            }
+
+            VStack(spacing: 1) {
+                Text(c.clock)
+                    .font(.system(size: labelR * 0.42, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(Self.paper)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                Text(c.eyebrow)
+                    .font(.system(size: max(7, labelR * 0.2), weight: .semibold))
+                    .tracking(1)
+                    .foregroundStyle(Self.paper.opacity(0.75))
+            }
+            .frame(width: labelR * 1.7)
+            .position(center)
+        }
+        .frame(width: w, height: h)
+    }
+}
+
+// MARK: - 輝光管
+
+/// 每支玻璃管裡一個橘色發光的數字，後面淡淡疊著沒亮的數字——輝光管的陰極是一疊數字。
+/// 底座一排小燈＝剩下的時間。
+private struct NixieDial: View {
+    let c: DialContext
+    let size: CGSize
+
+    private static let glow = Color(hex: 0xFF7A1F)
+    private static let core = Color(hex: 0xFFC27A)
+
+    var body: some View {
+        let w = size.width, h = size.height
+        let digits = c.clock.filter { $0 != ":" }.map { String($0) }
+        let minuteCount = c.minutes.count
+
+        Canvas { ctx, _ in
+            let pad = w * 0.05
+            let colonW = w * 0.05
+            let gap = w * 0.018
+            let n = CGFloat(digits.count)
+            let tubeW = (w - 2 * pad - colonW - gap * (n - 1)) / n
+            let tubeTop = h * 0.07
+            let tubeH = h * 0.64
+            let font = Font.system(size: tubeH * 0.66, weight: .light)
+
+            var x = pad
+            for (i, digit) in digits.enumerated() {
+                if i == minuteCount {
+                    // 冒號：兩顆氖燈，計時中一秒亮一秒暗
+                    let on = !c.running || (Int(c.seconds) ?? 0) % 2 == 0
+                    for fy in [0.38, 0.62] {
+                        let dot = circleRect(CGPoint(x: x - gap / 2 + colonW / 2, y: tubeTop + tubeH * CGFloat(fy)), 2)
+                        if on {
+                            ctx.drawLayer { l in
+                                l.addFilter(.blur(radius: 2.5))
+                                l.fill(Path(ellipseIn: dot.insetBy(dx: -1.5, dy: -1.5)), with: .color(Self.glow))
+                            }
+                        }
+                        ctx.fill(Path(ellipseIn: dot), with: .color(on ? Self.core : Color(hex: 0x4A2E1C)))
+                    }
+                    x += colonW
+                }
+
+                let tube = CGRect(x: x, y: tubeTop, width: tubeW, height: tubeH)
+                let shape = Path(roundedRect: tube, cornerSize: CGSize(width: tubeW * 0.45, height: tubeW * 0.45))
+                // 玻璃管
+                ctx.fill(shape, with: .linearGradient(
+                    Gradient(colors: [.white.opacity(0.10), .white.opacity(0.02), .white.opacity(0.06)]),
+                    startPoint: CGPoint(x: tube.minX, y: 0), endPoint: CGPoint(x: tube.maxX, y: 0)))
+                // 陽極網：淡淡的斜格
+                ctx.drawLayer { l in
+                    l.clip(to: shape)
+                    var mesh = Path()
+                    var mx = tube.minX - tubeH
+                    while mx < tube.maxX {
+                        mesh.move(to: CGPoint(x: mx, y: tube.maxY))
+                        mesh.addLine(to: CGPoint(x: mx + tubeH, y: tube.minY))
+                        mx += 3.5
+                    }
+                    l.stroke(mesh, with: .color(.white.opacity(0.035)), lineWidth: 0.5)
+                }
+                let mid = CGPoint(x: tube.midX, y: tube.midY + tubeH * 0.02)
+                // 沒亮的陰極數字
+                for ghost in ["8", "0"] where ghost != digit {
+                    ctx.draw(Text(ghost).font(font).foregroundColor(Color(hex: 0x6B4A33).opacity(0.35)), at: mid)
+                }
+                // 亮的數字：先畫一層模糊的光暈，再畫本體
+                ctx.drawLayer { l in
+                    l.addFilter(.blur(radius: 4))
+                    l.draw(Text(digit).font(font).foregroundColor(Self.glow), at: mid)
+                }
+                ctx.draw(Text(digit).font(font).foregroundColor(Self.core), at: mid)
+                // 玻璃反光與輪廓
+                ctx.fill(Path(roundedRect: CGRect(x: tube.minX + tubeW * 0.14, y: tube.minY + tubeW * 0.25,
+                                                  width: 1.4, height: tubeH * 0.5), cornerRadius: 0.7),
+                         with: .color(.white.opacity(0.25)))
+                ctx.stroke(shape, with: .color(.white.opacity(0.16)), lineWidth: 0.8)
+                // 管座
+                ctx.fill(Path(roundedRect: CGRect(x: tube.minX + 1, y: tube.maxY - 2, width: tubeW - 2, height: h * 0.05),
+                              cornerRadius: 1.5), with: .color(Color(hex: 0x2B2B2B)))
+                x += tubeW + gap
+            }
+
+            // 底座與一排小燈：剩多少亮多少
+            let base = CGRect(x: pad * 0.6, y: h * 0.79, width: w - pad * 1.2, height: h * 0.14)
+            ctx.fill(Path(roundedRect: base, cornerRadius: 3), with: .linearGradient(
+                Gradient(colors: [Color(hex: 0x3A2B20), Color(hex: 0x1E1611)]),
+                startPoint: CGPoint(x: 0, y: base.minY), endPoint: CGPoint(x: 0, y: base.maxY)))
+            let lamps = 12
+            let litCount = c.remaining > 0 ? Int(ceil(c.remaining * Double(lamps))) : 0
+            let lampSpan = base.width * 0.62
+            for i in 0..<lamps {
+                let p = CGPoint(x: base.minX + base.width * 0.06 + lampSpan * CGFloat(i) / CGFloat(lamps - 1),
+                                y: base.midY)
+                if i < litCount {
+                    ctx.drawLayer { l in
+                        l.addFilter(.blur(radius: 2))
+                        l.fill(Path(ellipseIn: circleRect(p, 2.6)), with: .color(Self.glow.opacity(0.9)))
+                    }
+                    ctx.fill(Path(ellipseIn: circleRect(p, 1.5)), with: .color(Self.core))
+                } else {
+                    ctx.fill(Path(ellipseIn: circleRect(p, 1.5)), with: .color(Color(hex: 0x4A3526)))
+                }
+            }
+            // 底座右邊的小字：提醒、休息，或模式名稱
+            let tag = c.alerting ? c.eyebrow : (c.phase.isBreak || !c.showsRounds ? c.eyebrow : "")
+            if !tag.isEmpty {
+                ctx.draw(Text(tag).font(.system(size: max(7.5, h * 0.075), weight: .semibold))
+                            .foregroundColor(c.alerting ? Self.core : Color(hex: 0xC9A27E)),
+                         at: CGPoint(x: base.maxX - base.width * 0.14, y: base.midY))
+            }
+        }
+        .frame(width: w, height: h)
     }
 }
