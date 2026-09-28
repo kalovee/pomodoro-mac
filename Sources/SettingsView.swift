@@ -4,103 +4,47 @@ import SwiftUI
 /// 所以標題和按鈕固定在上下、中間內容用 ScrollView，尺寸留餘裕。
 private let sheetSize = CGSize(width: 320, height: 412)
 
+/// 設定頁的分類。原本全部排成一長串，要找一個選項得一路往下捲
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case appearance, timer, alerts, sounds, general
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .appearance: return "外觀"
+        case .timer:      return "計時"
+        case .alerts:     return "提醒"
+        case .sounds:     return "聲音"
+        case .general:    return "一般"
+        }
+    }
+}
+
+/// 設定頁目前在哪一個分頁。不用 @State 的原因見 ContentView.swift 的 ViewState。
+final class SettingsUIState: ObservableObject {
+    @Published var tab: SettingsTab = .appearance
+}
+
 struct SettingsView: View {
     @EnvironmentObject var prefs: Prefs
     @EnvironmentObject var model: PomodoroModel
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var ui = SettingsUIState()
 
     var body: some View {
-        SheetFrame(title: "設定") {
-            group("風格") {
-                styleGallery
-            }
-
-            group("時間長度") {
-                presetRow
-                row("專注", value: $prefs.workMin, range: 1...120, unit: "分鐘")
-                row("短休息", value: $prefs.shortMin, range: 1...60, unit: "分鐘")
-                row("長休息", value: $prefs.longMin, range: 1...60, unit: "分鐘")
-                row("幾輪後長休息", value: $prefs.roundsPerLong, range: 2...8, unit: "輪")
-                row("單次倒數", value: $prefs.countdownMin, range: 1...180, unit: "分鐘")
-                caption("完整模式下沒在計時時，也可以直接在錶盤上拖一圈設定時間（1–60 分鐘）。")
-            }
-
-            group("提醒") {
-                Toggle("時間到播放音效", isOn: $prefs.soundOn)
-                Toggle("時間到顯示系統通知", isOn: $prefs.notifyOn)
-            }
-            .toggleStyle(.checkbox)
-
-            group("鈴聲") {
-                soundRow
-                mySoundsHint
-                row("音量", value: $prefs.alertVolume, range: 0...100, unit: "%", step: 10)
-                caption("這是相對系統音量的衰減。系統音量本身太小的話，調這裡也不會變大聲。")
-
-                choiceRow(["響固定次數", "直到按掉"],
-                          selected: prefs.ringUntilAck ? 1 : 0,
-                          caption: prefs.ringUntilAck
-                            ? "會一直響到你按掉圓盤為止，最久 5 分鐘"
-                            : "響完設定的次數就自動停止") { prefs.ringUntilAck = ($0 == 1) }
-
-                if !prefs.ringUntilAck {
-                    row("響幾聲", value: $prefs.ringCount, range: 1...20, unit: "聲")
-                    row("間隔", value: $prefs.ringGap, range: 1...10, unit: "秒")
+        SheetFrame(title: "設定", tabs: AnyView(tabPicker)) {
+            // 切分頁時換 id，內容淡入淡出，捲動位置也回到最上面
+            Group {
+                switch ui.tab {
+                case .appearance: appearanceTab
+                case .timer:      timerTab
+                case .alerts:     alertsTab
+                case .sounds:     soundsTab
+                case .general:    generalTab
                 }
             }
-
-            group("熱鍵") {
-                Toggle("啟用全域熱鍵", isOn: $prefs.globalHotkeys)
-                    .toggleStyle(.checkbox)
-                ForEach(Hotkeys.Action.allCases, id: \.rawValue) { action in
-                    HStack {
-                        Text(action.what).font(Theme.label)
-                        Spacer()
-                        Text(action.label)
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(RoundedRectangle(cornerRadius: 5).fill(Theme.fill))
-                    }
-                    .opacity(prefs.globalHotkeys ? 1 : 0.4)
-                }
-                caption("全域熱鍵在焦點於其他 App 時也有效，不需要任何系統權限。"
-                        + "若某組鍵已被別的 App 佔用，那一組會自動跳過。")
-                caption("番茄鐘視窗自己有焦點時不用按修飾鍵：空白鍵開始／暫停、"
-                        + "R 重設、S 跳過、Esc 停止提醒。打字時這些鍵不會被攔截。")
-            }
-
-            group("背景音效") {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("macOS 內建的白噪音").font(Theme.label)
-                    Spacer(minLength: 0)
-                    Button("打開系統設定") { openBackgroundSounds() }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.accent(model.phase))
-                }
-                caption("雨聲、海洋、溪流和三種噪音，都是 Apple 自己的素材。"
-                        + "番茄鐘沒辦法幫你自動開關——macOS 沒有提供對應的捷徑動作。")
-                caption("小技巧：系統設定 → 控制中心 → 聽力，設成「在選單列中顯示」，"
-                        + "之後就能一鍵開關。")
-            }
-
-            group("休息遮罩") {
-                choiceRow(OverlayMode.allCases.map(\.label),
-                          selected: OverlayMode.allCases.firstIndex(of: prefs.overlayMode) ?? 1,
-                          caption: prefs.overlayMode.note) {
-                    prefs.overlayMode = OverlayMode.allCases[$0]
-                }
-            }
-
-            group("行為") {
-                Toggle("浮在最上層（全螢幕 App 上也顯示）", isOn: $prefs.alwaysOnTop)
-                Toggle("時間到自動接下一段", isOn: $prefs.autoContinue)
-                Toggle("浮動時隱藏 Dock 圖示", isOn: $prefs.hideDock)
-                Toggle("縮小時閒置變半透明", isOn: $prefs.idleFade)
-            }
-            .toggleStyle(.checkbox)
+            .id(ui.tab)
+            .transition(.opacity)
         } footer: {
             Button("恢復預設") {
                 prefs.restoreDefaults()
@@ -110,7 +54,128 @@ struct SettingsView: View {
             Button("完成") { dismiss() }
                 .keyboardShortcut(.defaultAction)
         }
+        .animation(.easeOut(duration: 0.18), value: ui.tab)
     }
+
+    /// 設定頁上方的分頁。系統分段選單在 macOS 26 會畫成 Liquid Glass
+    private var tabPicker: some View {
+        Picker("分類", selection: $ui.tab) {
+            ForEach(SettingsTab.allCases) { tab in
+                Text(tab.label).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+
+    /// 外觀：錶盤風格
+    @ViewBuilder
+    private var appearanceTab: some View {
+        group("風格") {
+            styleGallery
+        }
+    }
+
+    /// 計時：各段長度、單次倒數，以及時間到之後怎麼接
+    @ViewBuilder
+    private var timerTab: some View {
+        group("時間長度") {
+            presetRow
+            row("專注", value: $prefs.workMin, range: 1...120, unit: "分鐘")
+            row("短休息", value: $prefs.shortMin, range: 1...60, unit: "分鐘")
+            row("長休息", value: $prefs.longMin, range: 1...60, unit: "分鐘")
+            row("幾輪後長休息", value: $prefs.roundsPerLong, range: 2...8, unit: "輪")
+            row("單次倒數", value: $prefs.countdownMin, range: 1...180, unit: "分鐘")
+            caption("完整模式下沒在計時時，也可以直接在錶盤上拖一圈設定時間（1–60 分鐘）。")
+        }
+        group("行為") {
+            Toggle("浮在最上層（全螢幕 App 上也顯示）", isOn: $prefs.alwaysOnTop)
+            Toggle("時間到自動接下一段", isOn: $prefs.autoContinue)
+            Toggle("浮動時隱藏 Dock 圖示", isOn: $prefs.hideDock)
+            Toggle("縮小時閒置變半透明", isOn: $prefs.idleFade)
+        }
+        .toggleStyle(.checkbox)
+    }
+
+    /// 提醒：音效、通知、鈴聲與休息遮罩
+    @ViewBuilder
+    private var alertsTab: some View {
+        group("提醒") {
+            Toggle("時間到播放音效", isOn: $prefs.soundOn)
+            Toggle("時間到顯示系統通知", isOn: $prefs.notifyOn)
+        }
+        .toggleStyle(.checkbox)
+        group("鈴聲") {
+            soundRow
+            mySoundsHint
+            row("音量", value: $prefs.alertVolume, range: 0...100, unit: "%", step: 10)
+            caption("這是相對系統音量的衰減。系統音量本身太小的話，調這裡也不會變大聲。")
+
+            choiceRow(["響固定次數", "直到按掉"],
+                      selected: prefs.ringUntilAck ? 1 : 0,
+                      caption: prefs.ringUntilAck
+                        ? "會一直響到你按掉圓盤為止，最久 5 分鐘"
+                        : "響完設定的次數就自動停止") { prefs.ringUntilAck = ($0 == 1) }
+
+            if !prefs.ringUntilAck {
+                row("響幾聲", value: $prefs.ringCount, range: 1...20, unit: "聲")
+                row("間隔", value: $prefs.ringGap, range: 1...10, unit: "秒")
+            }
+        }
+        group("休息遮罩") {
+            choiceRow(OverlayMode.allCases.map(\.label),
+                      selected: OverlayMode.allCases.firstIndex(of: prefs.overlayMode) ?? 1,
+                      caption: prefs.overlayMode.note) {
+                prefs.overlayMode = OverlayMode.allCases[$0]
+            }
+        }
+    }
+
+    /// 聲音：背景白噪音
+    @ViewBuilder
+    private var soundsTab: some View {
+        group("背景音效") {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("macOS 內建的白噪音").font(Theme.label)
+                Spacer(minLength: 0)
+                Button("打開系統設定") { openBackgroundSounds() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.accent(model.phase))
+            }
+            caption("雨聲、海洋、溪流和三種噪音，都是 Apple 自己的素材。"
+                    + "番茄鐘沒辦法幫你自動開關——macOS 沒有提供對應的捷徑動作。")
+            caption("小技巧：系統設定 → 控制中心 → 聽力，設成「在選單列中顯示」，"
+                    + "之後就能一鍵開關。")
+        }
+    }
+
+    /// 一般：熱鍵
+    @ViewBuilder
+    private var generalTab: some View {
+        group("熱鍵") {
+            Toggle("啟用全域熱鍵", isOn: $prefs.globalHotkeys)
+                .toggleStyle(.checkbox)
+            ForEach(Hotkeys.Action.allCases, id: \.rawValue) { action in
+                HStack {
+                    Text(action.what).font(Theme.label)
+                    Spacer()
+                    Text(action.label)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Theme.fill))
+                }
+                .opacity(prefs.globalHotkeys ? 1 : 0.4)
+            }
+            caption("全域熱鍵在焦點於其他 App 時也有效，不需要任何系統權限。"
+                    + "若某組鍵已被別的 App 佔用，那一組會自動跳過。")
+            caption("番茄鐘視窗自己有焦點時不用按修飾鍵：空白鍵開始／暫停、"
+                    + "R 重設、S 跳過、Esc 停止提醒。打字時這些鍵不會被攔截。")
+        }
+    }
+
 
     /// 常用組合，點一下四個數字一起換
     private var presetRow: some View {
@@ -444,7 +509,7 @@ private struct HistoryStats: View {
         let accent = Theme.accent(.work)
 
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline, spacing: 0) {
+            HStack(spacing: 8) {
                 figure(Self.hours(model.weekMinutes), "本週專注")
                 figure("\(model.streakDays) 天", "連續專注")
                 figure("\(model.todayCount) 個", "今天完成")
@@ -506,7 +571,7 @@ private struct HistoryStats: View {
     private func figure(_ value: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(Theme.ink)
                 .lineLimit(1)
@@ -515,7 +580,10 @@ private struct HistoryStats: View {
                 .font(Theme.caption)
                 .foregroundStyle(Theme.muted)
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10))
     }
 
     /// 大數字用：375 → 「6.3 小時」。三欄並排，「6 小時 15 分」塞不下
@@ -534,6 +602,8 @@ private struct HistoryStats: View {
 private struct SheetFrame<Content: View, Footer: View>: View {
     let title: String
     var accessory: String? = nil
+    /// 標題下方的分頁選單（設定頁用）
+    var tabs: AnyView? = nil
     @ViewBuilder let content: () -> Content
     @ViewBuilder let footer: () -> Footer
 
@@ -552,6 +622,12 @@ private struct SheetFrame<Content: View, Footer: View>: View {
             .padding(.horizontal, 20)
             .padding(.top, 18)
             .padding(.bottom, 12)
+
+            if let tabs {
+                tabs
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
+            }
 
             Rectangle().fill(Theme.hairline).frame(height: 1)
 

@@ -56,7 +56,13 @@ Every push is compiled on macOS by GitHub Actions (`.github/workflows/build.yml`
    mkdir -p ~/Applications && mv 番茄鐘.app ~/Applications/ && open ~/Applications/番茄鐘.app
    ```
 
-需要 macOS 14 以上（Info.plist 宣告的下限；實際只在 macOS 26 與 27 上測試過）。
+需要 **macOS 26 以上**：介面用了 Liquid Glass（`glassEffect` 等 macOS 26 才有的 API）。
+
+> **macOS 14–15 的 Mac**：請用改成 Liquid Glass 之前的最後一版，功能相同（十三種錶盤、三種計時模式、紀錄統計），只是介面是舊的扁平樣式：
+>
+> ```bash
+> git clone https://github.com/kalovee/pomodoro-mac.git && cd pomodoro-mac && git checkout macos14-last && ./build.sh
+> ```
 
 > **為什麼不直接提供 .app 下載？**
 > 這個 App 是 ad-hoc 簽章，沒有 Apple 的 Developer ID，也沒有經過公證。
@@ -138,6 +144,10 @@ Every push is compiled on macOS by GitHub Actions (`.github/workflows/build.yml`
 
 ## 設計
 
+- **Liquid Glass 分三層**：錶盤是內容層，維持實體、不包玻璃；上方模式選單、任務欄、按鈕、底部列是
+  浮在上面的玻璃控制層；最底下是兩團靜態的光暈，讓玻璃有東西可以折射。光暈用 RadialGradient
+  直接畫，不用模糊濾鏡，也不會動，只在換階段時跟著變色——浮在全螢幕 App 上的視窗，重畫越少越好
+- 上方的模式選單以整個視窗置中，不受左邊紅綠燈的留白影響；設定頁上方有分頁（外觀、計時、提醒、聲音、一般）
 - 中性色刻意偏一點暖，跟蕃茄紅同一個色溫家族；強調色只花在錶盤和主要按鈕上
 - 數字一律等寬（tabular），倒數時不會左右跳動
 - 輪數用實心／空心圓點表示，因為它本來就是一個有序的序列

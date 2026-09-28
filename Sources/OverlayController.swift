@@ -220,10 +220,11 @@ private struct OverlayView: View {
 
                     Button("跳過休息") { onSkip() }
                         .buttonStyle(.plain)
-                        .foregroundStyle(Theme.muted)
+                        .foregroundStyle(Theme.ink)
                         .padding(.horizontal, 18)
                         .frame(height: 38)
-                        .background(Capsule().fill(Theme.fill))
+                        .contentShape(Capsule())
+                        .glassEffect(.regular.interactive(), in: .capsule)
                 }
                 .font(.system(size: 13, weight: .semibold))
                 .padding(.top, 6)
