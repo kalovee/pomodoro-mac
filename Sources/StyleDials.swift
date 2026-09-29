@@ -2021,8 +2021,10 @@ private struct VinylDial: View {
                 let idle = !c.running && c.progress < 0.001 && !c.alerting
                 let needle: CGPoint
                 if idle {
-                    // 還沒開始／歸零：擱在唱片外緣的支架上
-                    let a = 15.0 * .pi / 180
+                    // 還沒開始／歸零：擱在唱片外緣的支架上。
+                    // 15° 的話唱針落在半徑約 0.92R，跟開始播放的位置（0.95R）幾乎重疊，看不出差別；
+                    // 20° 剛好到唱片外緣。再大唱頭會被圓形輪廓切掉（外框只比唱片大 2–3pt）。
+                    let a = 20.0 * .pi / 180
                     needle = CGPoint(x: pivot.x + L * CGFloat(sin(a)), y: pivot.y + L * CGFloat(cos(a)))
                     ctx.fill(Path(roundedRect: CGRect(x: needle.x - R * 0.035, y: needle.y - R * 0.02,
                                                       width: R * 0.07, height: R * 0.1), cornerRadius: 1.5),
