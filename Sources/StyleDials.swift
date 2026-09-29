@@ -1838,7 +1838,7 @@ private struct RecordArt: View {
                 .tracking(0.6)
                 .foregroundStyle(paper.opacity(0.9))
                 .position(x: R, y: R + labelR * 0.34)
-            Text("33⅓ RPM")
+            Text("16⅔ RPM")
                 .font(.system(size: max(4.5, labelR * 0.13), weight: .medium))
                 .foregroundStyle(paper.opacity(0.7))
                 .position(x: R, y: R + labelR * 0.58)
@@ -1883,7 +1883,9 @@ private final class RecordSpinView: NSView {
         let spin = CABasicAnimation(keyPath: "transform.rotation.z")
         spin.fromValue = 0
         spin.toValue = -2 * Double.pi            // 圖層座標 y 朝上，負的才是順時針
-        spin.duration = 1.8                      // 33⅓ RPM
+        // 16⅔ RPM：真實存在的最慢標準轉速（早期有聲書、背景音樂唱片）。
+        // 33⅓ 在 15–20 fps 下每格要跳 10–13°，看起來比實際更急
+        spin.duration = 3.6
         spin.repeatCount = .infinity
         spin.isRemovedOnCompletion = false
         spin.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 20, preferred: 20)
