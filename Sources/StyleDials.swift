@@ -1172,8 +1172,9 @@ private struct MoonDial: View {
             shade.addEllipse(in: circleRect(CGPoint(x: p.x - s * 0.18, y: p.y), s))
             lit.addEllipse(in: circleRect(CGPoint(x: p.x + s * 0.25, y: p.y), s * 0.72))
         }
-        ctx.fill(shade, with: .color(.black.opacity(0.20)))
-        ctx.fill(lit, with: .color(.white.opacity(0.22)))
+        // 這個尺寸下真實的坑很淡，太深會像一顆顆灰點
+        ctx.fill(shade, with: .color(.black.opacity(0.11)))
+        ctx.fill(lit, with: .color(.white.opacity(0.13)))
 
         // 年輕隕石坑：亮白的坑和放射狀的射紋
         for (dx, dy, cr, rayLen) in rayed {
