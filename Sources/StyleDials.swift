@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// 畫錶盤需要的所有東西，打包成一個值。
 ///
@@ -26,6 +27,13 @@ struct DialContext {
     var showsRounds: Bool = true
     /// 每開始新的一段 +1，沙漏靠它翻面
     var segmentID: Int = 0
+    /// 任務名稱：黑膠唱片把它當歌名印在標籤上
+    var task: String = ""
+    var mode: TimerMode = .pomodoro
+    /// 黑膠用會轉的 Core Animation 圖層（完整模式、沒開減少動態效果）；否則用靜態圖
+    var usesLiveRecord: Bool = false
+    /// 黑膠此刻要不要轉：上面那個條件再加上正在計時
+    var spins: Bool = false
 
     var tint: Color { Theme.accent(phase) }
     /// 剩多少（0…1）。沙漏、水位、月相都表達這個，跟倒數數字同一個方向。
@@ -54,6 +62,11 @@ struct DialContext {
         countsUp = model.mode == .stopwatch
         showsRounds = model.mode == .pomodoro
         segmentID = model.segmentID
+        task = model.task
+        mode = model.mode
+        // 縮小模式不轉：讀書時眼角有東西一直轉會分心。系統開了減少動態效果也不轉
+        usesLiveRecord = !isCompact && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        spins = usesLiveRecord && model.running
         self.isCompact = isCompact
         self.hovering = hovering
     }
@@ -992,28 +1005,74 @@ private struct HourglassDial: View {
 
 // MARK: - 月相
 
-/// 參考機械錶的月相盤：深藍星空、帶暖色的月面，暗面留一點地球反照，
-/// 月海（深色斑塊）讓它看起來是月亮而不是一顆白圓。亮面＝剩下的時間，由滿月缺成新月。
+/// 固定種子的亂數：星星與隕石坑的位置每次都一樣，不會每秒重排
+private struct SeededRandom {
+    private var seed: UInt64
+    init(_ seed: UInt64) { self.seed = seed }
+    mutating func next() -> CGFloat {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return CGFloat((seed >> 33) % 10_000) / 10_000
+    }
+}
+
+/// 寫實的月亮：依真實位置排的月海、帶明暗的隕石坑、第谷與哥白尼的射紋，
+/// 柔和的明暗交界，以及暗面淡淡的地球反照。夜空參考機械錶的砂金石月相盤。
+///
+/// 虧月：**亮面在左，光從左邊來**。亮面＝剩下的時間，由滿月缺成新月。
 private struct MoonDial: View {
     let c: DialContext
     let size: CGSize
 
-    /// 星星位置（相對座標），刻意避開月亮。第三個值是半徑，大於 1 的畫成十字星芒。
-    private static let stars: [(CGFloat, CGFloat, CGFloat)] = [
-        (0.20, 0.22, 1.3), (0.78, 0.18, 0.9), (0.85, 0.42, 1.1), (0.14, 0.50, 0.8),
-        (0.30, 0.10, 0.7), (0.24, 0.72, 0.9), (0.80, 0.68, 0.7), (0.53, 0.07, 0.8),
-        (0.68, 0.30, 0.6), (0.10, 0.34, 0.6),
-    ]
-    /// 月海：中心（相對月心，以半徑為單位）和半徑
-    private static let maria: [(CGFloat, CGFloat, CGFloat)] = [
-        (-0.28, -0.22, 0.24), (0.14, -0.30, 0.17), (0.28, 0.06, 0.21),
-        (-0.08, 0.20, 0.15), (0.04, 0.48, 0.10), (-0.40, 0.36, 0.08),
+    /// 星星：相對座標、半徑、亮度
+    private static let stars: [(CGFloat, CGFloat, CGFloat, Double)] = {
+        var rng = SeededRandom(0x57A25)
+        var out: [(CGFloat, CGFloat, CGFloat, Double)] = []
+        while out.count < 40 {
+            let x = rng.next(), y = rng.next() * 0.66
+            // 避開月亮本體和它的光暈
+            let dx = x - 0.5, dy = y - 0.36
+            if dx * dx + dy * dy < 0.09 { continue }
+            out.append((x, y, 0.35 + rng.next() * 0.9, 0.3 + Double(rng.next()) * 0.6))
+        }
+        return out
+    }()
+
+    /// 月海：中心（相對月心，以半徑為單位，北在上）與兩軸半徑。依真實月面位置排
+    private static let maria: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
+        (-0.56, 0.02, 0.28, 0.44),   // 風暴洋
+        (-0.44, 0.26, 0.20, 0.18),   // 風暴洋南側
+        (-0.28, -0.38, 0.25, 0.21),  // 雨海
+        (-0.04, -0.68, 0.40, 0.08),  // 冷海
+        (0.18, -0.38, 0.15, 0.14),   // 澄海
+        (0.32, -0.08, 0.20, 0.16),   // 靜海
+        (0.66, -0.30, 0.12, 0.10),   // 危海
+        (0.56, 0.16, 0.12, 0.17),    // 豐富海
+        (0.36, 0.30, 0.09, 0.09),    // 酒海
+        (-0.18, 0.38, 0.18, 0.13),   // 雲海
+        (-0.48, 0.42, 0.09, 0.09),   // 濕海
+        (0.00, -0.12, 0.10, 0.08),   // 汽海
+        (-0.24, -0.04, 0.12, 0.09),  // 島海
     ]
 
-    private static let starColor = Color(hex: 0xF3E6C2)
-    private static let moonLight = Color(hex: 0xFBF6E6)
-    private static let moonEdge = Color(hex: 0xE4D8B8)
-    private static let moonDark = Color(hex: 0x252C4D)
+    /// 小隕石坑：相對月心的位置與半徑
+    private static let craters: [(CGFloat, CGFloat, CGFloat)] = {
+        var rng = SeededRandom(0xC7A7E)
+        var out: [(CGFloat, CGFloat, CGFloat)] = []
+        while out.count < 40 {
+            let x = rng.next() * 1.8 - 0.9, y = rng.next() * 1.8 - 0.9
+            if x * x + y * y > 0.78 { continue }
+            out.append((x, y, 0.015 + rng.next() * 0.045))
+        }
+        return out
+    }()
+
+    /// 有射紋的年輕隕石坑：第谷（南方高地）與哥白尼
+    private static let rayed: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
+        (-0.12, 0.66, 0.045, 0.7),   // 第谷：射紋最長
+        (-0.32, -0.12, 0.040, 0.35), // 哥白尼
+    ]
+
+    private static let gold = Color(hex: 0xF1D9A0)
 
     var body: some View {
         let w = size.width, h = size.height
@@ -1023,52 +1082,52 @@ private struct MoonDial: View {
 
         ZStack {
             Canvas { ctx, _ in
-                // 天頂稍亮。半透明疊在底色上，提醒時的底色閃光才透得過來
+                // 夜空：上面略亮的深藍漸層。半透明疊在底色上，提醒時的底色閃光才透得過來
                 ctx.fill(Path(CGRect(x: 0, y: 0, width: w, height: h)),
-                         with: .radialGradient(Gradient(colors: [.white.opacity(0.07), .clear]),
-                                               center: CGPoint(x: w / 2, y: h * 0.2),
-                                               startRadius: 0, endRadius: w * 0.7))
-
-                for (x, y, s) in Self.stars {
+                         with: .linearGradient(Gradient(colors: [Color(hex: 0x1B2550).opacity(0.85),
+                                                                 Color(hex: 0x070A17).opacity(0.85)]),
+                                               startPoint: .zero, endPoint: CGPoint(x: 0, y: h)))
+                // 砂金石般的金色細點，少數帶十字星芒
+                for (i, (x, y, s, a)) in Self.stars.enumerated() {
                     let p = CGPoint(x: w * x, y: h * y)
-                    ctx.fill(Path(ellipseIn: circleRect(p, s)), with: .color(Self.starColor.opacity(0.7)))
-                    if s > 1 {
+                    ctx.fill(Path(ellipseIn: circleRect(p, s)), with: .color(Self.gold.opacity(a)))
+                    if i % 9 == 0 {
                         var cross = Path()
-                        cross.move(to: CGPoint(x: p.x - s * 3, y: p.y))
-                        cross.addLine(to: CGPoint(x: p.x + s * 3, y: p.y))
-                        cross.move(to: CGPoint(x: p.x, y: p.y - s * 3))
-                        cross.addLine(to: CGPoint(x: p.x, y: p.y + s * 3))
-                        ctx.stroke(cross, with: .color(Self.starColor.opacity(0.35)), lineWidth: 0.6)
+                        cross.move(to: CGPoint(x: p.x - s * 4, y: p.y))
+                        cross.addLine(to: CGPoint(x: p.x + s * 4, y: p.y))
+                        cross.move(to: CGPoint(x: p.x, y: p.y - s * 4))
+                        cross.addLine(to: CGPoint(x: p.x, y: p.y + s * 4))
+                        ctx.stroke(cross, with: .color(Self.gold.opacity(a * 0.5)), lineWidth: 0.5)
                     }
                 }
 
                 // 光暈跟著亮面大小變淡
-                ctx.fill(Path(ellipseIn: circleRect(center, r * 1.7)),
-                         with: .radialGradient(Gradient(colors: [Self.moonLight.opacity(0.03 + 0.13 * c.remaining),
+                ctx.fill(Path(ellipseIn: circleRect(center, r * 1.8)),
+                         with: .radialGradient(Gradient(colors: [Color(hex: 0xFBF6E6).opacity(0.03 + 0.14 * c.remaining),
                                                                  .clear]),
-                                               center: center, startRadius: r * 0.9, endRadius: r * 1.7))
+                                               center: center, startRadius: r * 0.9, endRadius: r * 1.8))
 
-                // 暗面：地球反照，看得出整顆月亮的輪廓
                 let disk = Path(ellipseIn: circleRect(center, r))
-                ctx.fill(disk, with: .color(Self.moonDark))
 
-                let lit = Self.litPath(center: center, r: r, fraction: c.remaining)
-                ctx.fill(lit, with: .radialGradient(Gradient(colors: [Self.moonLight, Self.moonEdge]),
-                                                    center: CGPoint(x: center.x - r * 0.3, y: center.y - r * 0.3),
-                                                    startRadius: 0, endRadius: r * 1.4))
-                // 月光只帶一點階段色，太多會變成粉紅色的月亮
-                ctx.fill(lit, with: .color(c.tint.opacity(0.10)))
-
-                // 月海：亮面上是淡灰斑，暗面上是更暗的斑，一次畫完
-                ctx.drawLayer { layer in
-                    layer.clip(to: disk)
-                    var m = Path()
-                    for (dx, dy, rr) in Self.maria {
-                        m.addEllipse(in: circleRect(CGPoint(x: center.x + dx * r, y: center.y + dy * r), rr * r))
-                    }
-                    layer.fill(m, with: .color(.black.opacity(0.09)))
+                // 暗面：地球反照。同一張月面壓得很暗、偏藍，看得出月海的輪廓
+                ctx.drawLayer { l in
+                    l.clip(to: disk)
+                    Self.drawSurface(in: &l, center: center, r: r)
+                    l.fill(disk, with: .color(Color(hex: 0x0A0F26).opacity(0.86)))
                 }
-                ctx.stroke(disk, with: .color(.white.opacity(0.08)), lineWidth: 1)
+
+                // 亮面：三層往暗面偏一點、越外越淡，明暗交界才是柔和的漸層而不是一刀切
+                let f = c.remaining
+                if f > 0.002 {
+                    for (extra, alpha) in [(0.035, 0.30), (0.017, 0.55), (0.0, 1.0)] {
+                        ctx.drawLayer { l in
+                            l.clip(to: Self.litPath(center: center, r: r, fraction: min(1, f + extra)))
+                            l.opacity = alpha
+                            Self.drawSurface(in: &l, center: center, r: r)
+                        }
+                    }
+                }
+                ctx.stroke(disk, with: .color(.white.opacity(0.07)), lineWidth: 0.8)
             }
             VStack(spacing: 4) {
                 Text(c.clock)
@@ -1079,6 +1138,63 @@ private struct MoonDial: View {
             .position(x: w / 2, y: h * 0.79)
         }
         .frame(width: w, height: h)
+    }
+
+    /// 滿月的月面：底色、臨邊昏暗、月海、隕石坑、射紋。亮面和暗面都用它，再各自裁切、調亮度。
+    private static func drawSurface(in ctx: inout GraphicsContext, center: CGPoint, r: CGFloat) {
+        let disk = Path(ellipseIn: circleRect(center, r))
+        // 底色偏暖的灰白，中間亮、邊緣暗（臨邊昏暗）；最亮處偏向光源所在的左邊
+        ctx.fill(disk, with: .radialGradient(
+            Gradient(colors: [Color(hex: 0xF2EEE4), Color(hex: 0xDCD6C9), Color(hex: 0xAFA898)]),
+            center: CGPoint(x: center.x - r * 0.22, y: center.y - r * 0.12),
+            startRadius: 0, endRadius: r * 1.15))
+
+        // 月海：先畫一圈放大的淡色，再畫本體，邊緣才不是整齊的橢圓
+        var halo = Path(), core = Path()
+        for (dx, dy, rx, ry) in maria {
+            let c0 = CGPoint(x: center.x + dx * r, y: center.y + dy * r)
+            halo.addEllipse(in: CGRect(x: c0.x - rx * r * 1.18, y: c0.y - ry * r * 1.12,
+                                       width: rx * r * 2.36, height: ry * r * 2.24))
+            core.addEllipse(in: CGRect(x: c0.x - rx * r, y: c0.y - ry * r, width: rx * r * 2, height: ry * r * 2))
+            // 每片再加一個錯開的小橢圓，讓輪廓不規則
+            core.addEllipse(in: CGRect(x: c0.x + rx * r * 0.2, y: c0.y - ry * r * 0.9,
+                                       width: rx * r * 1.1, height: ry * r * 1.2))
+        }
+        ctx.fill(halo, with: .color(Color(hex: 0x6F695E).opacity(0.14)))
+        ctx.fill(core, with: .color(Color(hex: 0x6F695E).opacity(0.30)))
+
+        // 隕石坑是凹下去的：光從左邊來，所以坑的左半（靠光源那側的內壁）在陰影裡、
+        // 右半（背光那側的內壁）受光。先畫一片暗的、再往右錯開疊一片亮的
+        var shade = Path(), lit = Path()
+        for (dx, dy, cr) in craters {
+            let p = CGPoint(x: center.x + dx * r, y: center.y + dy * r)
+            let s = cr * r
+            shade.addEllipse(in: circleRect(CGPoint(x: p.x - s * 0.18, y: p.y), s))
+            lit.addEllipse(in: circleRect(CGPoint(x: p.x + s * 0.25, y: p.y), s * 0.72))
+        }
+        ctx.fill(shade, with: .color(.black.opacity(0.20)))
+        ctx.fill(lit, with: .color(.white.opacity(0.22)))
+
+        // 年輕隕石坑：亮白的坑和放射狀的射紋
+        for (dx, dy, cr, rayLen) in rayed {
+            let p = CGPoint(x: center.x + dx * r, y: center.y + dy * r)
+            var rays = Path()
+            for i in 0..<14 {
+                let a = Double(i) / 14 * 2 * .pi + 0.2
+                let len = r * rayLen * (0.55 + 0.45 * CGFloat(abs(sin(Double(i) * 1.7))))
+                rays.move(to: p)
+                rays.addLine(to: CGPoint(x: p.x + len * CGFloat(cos(a)), y: p.y + len * CGFloat(sin(a))))
+            }
+            ctx.drawLayer { l in
+                l.clip(to: disk)
+                l.stroke(rays, with: .color(.white.opacity(0.12)), lineWidth: max(0.6, r * 0.018))
+            }
+            ctx.fill(Path(ellipseIn: circleRect(p, cr * r * 1.6)), with: .color(.white.opacity(0.25)))
+            ctx.fill(Path(ellipseIn: circleRect(CGPoint(x: p.x - cr * r * 0.2, y: p.y), cr * r)),
+                     with: .color(.black.opacity(0.18)))
+            ctx.fill(Path(ellipseIn: circleRect(CGPoint(x: p.x + cr * r * 0.25, y: p.y), cr * r * 0.7)),
+                     with: .color(.white.opacity(0.55)))
+        }
     }
 
     /// 亮面：左邊的月緣半圓 ＋ 明暗交界的半橢圓。
@@ -1621,102 +1737,354 @@ private struct CandleDial: View {
 
 // MARK: - 黑膠唱片
 
-/// 唱臂從外圈往內移＝進度，走到標籤邊就是這一段結束。
-/// 唱片不轉：轉動是常駐動畫，浮在全螢幕 App 上會一直重畫。
+/// 唱片圖上要印的東西。只有這些變了才重畫唱片圖，計時中每秒的更新不會碰到它。
+private struct RecordKey: Hashable {
+    let title: String
+    let sideB: Bool
+    let mode: TimerMode
+    let track: Int
+    let tracks: Int
+    let diameter: CGFloat
+    let scale: CGFloat
+}
+
+/// 唱片本體：溝紋、軌間空白、外緣、標籤、中心孔。這張圖會整張轉，
+/// 所以上面只放會跟著唱片轉的東西——時間、提醒文字、輪數都不放在這裡。
+private struct RecordArt: View {
+    let key: RecordKey
+
+    private var sideLabel: String {
+        switch key.mode {
+        case .pomodoro:  return "SIDE \(key.sideB ? "B" : "A") · TRACK \(key.track)"
+        case .countdown: return "SINGLE"
+        case .stopwatch: return "LIVE"
+        }
+    }
+
+    var body: some View {
+        let d = key.diameter
+        let R = d / 2
+        let labelR = R * 0.40
+        let labelColor = key.sideB ? Color(hex: 0x1F5C63) : Color(hex: 0xC8452F)
+        let paper = Color(hex: 0xF6EBDD)
+
+        ZStack {
+            Canvas { ctx, _ in
+                let c = CGPoint(x: R, y: R)
+                // 唱片本體
+                ctx.fill(Path(ellipseIn: circleRect(c, R * 0.985)), with: .radialGradient(
+                    Gradient(colors: [Color(hex: 0x1E1E1E), Color(hex: 0x0B0B0B)]),
+                    center: c, startRadius: labelR, endRadius: R))
+
+                // 溝紋：一圈一圈，亮度微微交錯，看起來才像有深淺的刻痕
+                let outer = R * 0.955, inner = labelR * 1.12
+                let pitch = max(1.2, R * 0.018)
+                var even = Path(), odd = Path()
+                var gr = inner, i = 0
+                while gr < outer {
+                    if i % 2 == 0 { even.addEllipse(in: circleRect(c, gr)) } else { odd.addEllipse(in: circleRect(c, gr)) }
+                    gr += pitch
+                    i += 1
+                }
+                ctx.stroke(even, with: .color(.white.opacity(0.05)), lineWidth: 0.5)
+                ctx.stroke(odd, with: .color(.white.opacity(0.025)), lineWidth: 0.5)
+
+                // 軌與軌之間的空白帶：比溝紋亮一點的平滑環。番茄鐘一輪幾個番茄就分幾軌
+                let tracks = max(1, key.tracks)
+                if tracks > 1 {
+                    var gaps = Path()
+                    for t in 1..<tracks {
+                        let gapR = outer - (outer - inner) * CGFloat(t) / CGFloat(tracks)
+                        gaps.addEllipse(in: circleRect(c, gapR))
+                    }
+                    ctx.stroke(gaps, with: .color(.white.opacity(0.10)), lineWidth: max(1, R * 0.018))
+                }
+                // 導入溝（最外圈）和收尾溝（標籤外）
+                ctx.stroke(Path(ellipseIn: circleRect(c, outer + R * 0.012)),
+                           with: .color(.white.opacity(0.08)), lineWidth: 0.8)
+                ctx.stroke(Path(ellipseIn: circleRect(c, inner - R * 0.03)),
+                           with: .color(.white.opacity(0.07)), lineWidth: 0.8)
+                // 唱片邊緣的亮邊
+                ctx.stroke(Path(ellipseIn: circleRect(c, R * 0.98)),
+                           with: .color(.white.opacity(0.14)), lineWidth: 0.8)
+
+                // 標籤：底色、一圈細環
+                ctx.fill(Path(ellipseIn: circleRect(c, labelR)), with: .radialGradient(
+                    Gradient(colors: [labelColor.opacity(0.92), labelColor]),
+                    center: c, startRadius: 0, endRadius: labelR))
+                ctx.stroke(Path(ellipseIn: circleRect(c, labelR * 0.93)),
+                           with: .color(paper.opacity(0.4)), lineWidth: 0.6)
+                // 中心孔
+                ctx.fill(Path(ellipseIn: circleRect(c, max(1.6, R * 0.024))), with: .color(Color(hex: 0x0E0E0E)))
+            }
+
+            // 標籤上的字：廠牌、歌名（＝任務）、面與軌、轉速
+            Text("POMODORO RECORDS")
+                .font(.system(size: max(4.5, labelR * 0.13), weight: .semibold))
+                .tracking(0.8)
+                .foregroundStyle(paper.opacity(0.75))
+                .position(x: R, y: R - labelR * 0.64)
+            Text(key.title)
+                .font(.system(size: max(6, labelR * 0.25), weight: .bold))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.5)
+                .foregroundStyle(paper)
+                .frame(width: labelR * 1.45, height: labelR * 0.55)
+                .position(x: R, y: R - labelR * 0.27)
+            Text(sideLabel)
+                .font(.system(size: max(4.5, labelR * 0.14), weight: .semibold))
+                .tracking(0.6)
+                .foregroundStyle(paper.opacity(0.9))
+                .position(x: R, y: R + labelR * 0.34)
+            Text("33⅓ RPM")
+                .font(.system(size: max(4.5, labelR * 0.13), weight: .medium))
+                .foregroundStyle(paper.opacity(0.7))
+                .position(x: R, y: R + labelR * 0.58)
+        }
+        .frame(width: d, height: d)
+    }
+}
+
+/// 唱片圖的快取。ImageRenderer 不便宜，只在標籤內容或尺寸變了才重畫；
+/// 同一個 key 回傳同一個 CGImage 物件，SpinningRecord 靠這個判斷「圖沒變」。
+@MainActor
+private enum RecordArtCache {
+    private static var images: [RecordKey: CGImage] = [:]
+
+    static func image(for key: RecordKey) -> CGImage? {
+        if let hit = images[key] { return hit }
+        let renderer = ImageRenderer(content: RecordArt(key: key))
+        renderer.scale = key.scale
+        guard let img = renderer.cgImage else { return nil }
+        // 縮小模式、完整模式、設定縮圖各一張，加上換任務名稱時的舊圖；超過就整個清掉重來
+        if images.count > 8 { images.removeAll() }
+        images[key] = img
+        return img
+    }
+}
+
+/// 轉唱片的那層：一個 CALayer 放唱片圖，由 Core Animation 轉——
+/// 動畫交給 WindowServer 合成，SwiftUI 仍然只吃 1 Hz 的更新。
+private final class RecordSpinView: NSView {
+    private let disc = CALayer()
+    private var spinning = false
+    private var currentImage: CGImage?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        disc.contentsGravity = .resizeAspect
+        layer?.addSublayer(disc)
+
+        // 動畫只在這裡加一次，之後只用 speed / timeOffset 暫停與恢復。
+        // 每秒 updateNSView 重加的話，唱片會每秒跳回原點。
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = -2 * Double.pi            // 圖層座標 y 朝上，負的才是順時針
+        spin.duration = 1.8                      // 33⅓ RPM
+        spin.repeatCount = .infinity
+        spin.isRemovedOnCompletion = false
+        spin.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 20, preferred: 20)
+        disc.add(spin, forKey: "spin")
+        pause()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// 滑鼠事件穿過去給 SwiftUI：拖曳設定時間、點一下停止提醒都靠它
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        disc.bounds = CGRect(origin: .zero, size: bounds.size)
+        disc.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        CATransaction.commit()
+    }
+
+    func setImage(_ image: CGImage, scale: CGFloat) {
+        if let current = currentImage, current === image { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        disc.contents = image
+        disc.contentsScale = scale
+        CATransaction.commit()
+        currentImage = image
+    }
+
+    func setSpinning(_ on: Bool) {
+        guard on != spinning else { return }
+        spinning = on
+        if on { resume() } else { pause() }
+    }
+
+    /// 停在當下角度（Apple 文件的標準做法）
+    private func pause() {
+        let t = disc.convertTime(CACurrentMediaTime(), from: nil)
+        disc.speed = 0
+        disc.timeOffset = t
+    }
+
+    /// 從暫停的角度接著轉
+    private func resume() {
+        let paused = disc.timeOffset
+        disc.speed = 1
+        disc.timeOffset = 0
+        disc.beginTime = 0
+        disc.beginTime = disc.convertTime(CACurrentMediaTime(), from: nil) - paused
+    }
+}
+
+private struct SpinningRecord: NSViewRepresentable {
+    let image: CGImage
+    let scale: CGFloat
+    let spins: Bool
+
+    func makeNSView(context: Context) -> RecordSpinView {
+        let v = RecordSpinView(frame: .zero)
+        v.setImage(image, scale: scale)
+        v.setSpinning(spins)
+        return v
+    }
+
+    /// 冪等：圖沒換、spins 沒變就什麼都不做
+    func updateNSView(_ v: RecordSpinView, context: Context) {
+        v.setImage(image, scale: scale)
+        v.setSpinning(spins)
+    }
+}
+
+/// 黑膠唱片：唱臂從外圈往內走＝進度。
+///
+/// 四層：會轉的唱片圖（只在完整模式計時中轉）、不轉的光澤與「播過的外圈」、
+/// 不轉的唱臂、不轉的時間膠囊。縮小模式不轉——讀書時眼角有東西一直轉會分心。
 private struct VinylDial: View {
     let c: DialContext
     let size: CGSize
-
-    private static let label = Color(hex: 0xC8452F)
-    private static let paper = Color(hex: 0xF6EBDD)
 
     var body: some View {
         let w = size.width, h = size.height
         let R = min(w, h) / 2 - (c.isCompact ? 3 : 2)
         let center = CGPoint(x: w / 2, y: h / 2)
-        let labelR = R * 0.44
+        let labelR = R * 0.40
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        let trimmed = c.task.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = RecordKey(title: trimmed.isEmpty ? "專注時光" : trimmed,
+                            sideB: c.phase.isBreak, mode: c.mode,
+                            track: c.roundInCycle + 1, tracks: c.mode == .pomodoro ? c.rounds : 1,
+                            diameter: (2 * R).rounded(), scale: scale)
+        let art = RecordArtCache.image(for: key)
 
         ZStack {
-            Canvas { ctx, _ in
-                // 唱片本體
-                ctx.fill(Path(ellipseIn: circleRect(center, R)), with: .radialGradient(
-                    Gradient(colors: [Color(hex: 0x262626), Color(hex: 0x0D0D0D)]),
-                    center: center, startRadius: labelR, endRadius: R))
+            Circle().fill(Color(hex: 0x111111))
+                .frame(width: 2 * R, height: 2 * R)
+                .position(center)
 
-                // 溝紋：一條路徑畫完
-                var grooves = Path()
-                var gr = labelR + R * 0.05
-                while gr < R * 0.97 {
-                    grooves.addEllipse(in: circleRect(center, gr))
-                    gr += max(1.8, R * 0.028)
+            if let art {
+                Group {
+                    if c.usesLiveRecord {
+                        SpinningRecord(image: art, scale: scale, spins: c.spins)
+                    } else {
+                        Image(decorative: art, scale: scale)
+                    }
                 }
-                ctx.stroke(grooves, with: .color(.white.opacity(0.045)), lineWidth: 0.5)
+                .frame(width: key.diameter, height: key.diameter)
+                .position(center)
+            }
 
-                // 光澤：左上和右下兩道反光
+            Canvas { ctx, _ in
+                // 光澤：光源不動，唱片在底下轉，反光就該停在原地
                 for start in [0.58, 0.08] {
-                    ctx.fill(sector(center: center, radius: R * 0.97, from: start).intersection(
-                        pie(center: center, radius: R * 0.97, fraction: start + 0.07)),
+                    ctx.fill(sector(center: center, radius: R * 0.96, from: start).intersection(
+                        pie(center: center, radius: R * 0.96, fraction: start + 0.07)),
                              with: .color(.white.opacity(0.07)))
                 }
 
-                // 已經播過的外圈稍微暗一點
-                let playR = R * 0.95 - (R * 0.95 - labelR * 1.08) * c.progress
+                // 唱針所在的半徑：從外圈往內走
+                let playR = R * 0.95 - (R * 0.95 - labelR * 1.1) * c.progress
+
+                // 播過的外圈稍微暗一點（畫在不轉的這層，唱片圖不用每秒重畫）
                 if c.progress > 0.002 {
-                    var played = Path(ellipseIn: circleRect(center, R * 0.96))
+                    var played = Path(ellipseIn: circleRect(center, R * 0.955))
                     played.addEllipse(in: circleRect(center, playR))
-                    ctx.fill(played, with: .color(.black.opacity(0.28)), style: FillStyle(eoFill: true))
+                    ctx.fill(played, with: .color(.black.opacity(0.25)), style: FillStyle(eoFill: true))
                 }
 
-                // 標籤與中心孔
-                ctx.fill(Path(ellipseIn: circleRect(center, labelR)), with: .color(Self.label))
-                ctx.stroke(Path(ellipseIn: circleRect(center, labelR * 0.93)),
-                           with: .color(Self.paper.opacity(0.35)), lineWidth: 0.6)
-                ctx.fill(Path(ellipseIn: circleRect(center, max(1.8, R * 0.025))), with: .color(Color(hex: 0x111111)))
-
-                // 唱臂：支點在右上，唱針落在半徑 playR 的地方（兩圓交點，取右下那一個）
+                // 唱臂：支點在右上
                 let pivot = CGPoint(x: center.x + R * 0.62, y: center.y - R * 0.62)
                 let L = R * 0.95
-                let px = pivot.x - center.x, py = pivot.y - center.y
-                let d = (px * px + py * py).squareRoot()
-                let a = (playR * playR - L * L + d * d) / (2 * d)
-                let hh = max(0, playR * playR - a * a).squareRoot()
-                let needle = CGPoint(x: center.x + a * px / d - hh * py / d,
+                let idle = !c.running && c.progress < 0.001 && !c.alerting
+                let needle: CGPoint
+                if idle {
+                    // 還沒開始／歸零：擱在唱片外緣的支架上
+                    let a = 15.0 * .pi / 180
+                    needle = CGPoint(x: pivot.x + L * CGFloat(sin(a)), y: pivot.y + L * CGFloat(cos(a)))
+                    ctx.fill(Path(roundedRect: CGRect(x: needle.x - R * 0.035, y: needle.y - R * 0.02,
+                                                      width: R * 0.07, height: R * 0.1), cornerRadius: 1.5),
+                             with: .color(Color(hex: 0x5A5A5A)))
+                } else {
+                    // 唱針落在半徑 playR 的地方：兩圓交點取右下那一個
+                    let px = pivot.x - center.x, py = pivot.y - center.y
+                    let d = (px * px + py * py).squareRoot()
+                    let a = (playR * playR - L * L + d * d) / (2 * d)
+                    let hh = max(0, playR * playR - a * a).squareRoot()
+                    needle = CGPoint(x: center.x + a * px / d - hh * py / d,
                                      y: center.y + a * py / d + hh * px / d)
+                }
+                // 暫停時唱臂在原位抬起：影子拉遠變淡，唱臂本身往上一點
+                let lifted = !c.running && !idle
+                let lift: CGFloat = lifted ? -1.5 : 0
+                let shadowOffset = lifted ? CGSize(width: 4, height: 5.5) : CGSize(width: 1.5, height: 2)
+                let shadowAlpha = lifted ? 0.25 : 0.45
 
+                let tail = CGPoint(x: pivot.x + (pivot.x - needle.x) * 0.16, y: pivot.y + (pivot.y - needle.y) * 0.16)
                 var arm = Path()
-                arm.move(to: CGPoint(x: pivot.x + (pivot.x - needle.x) * 0.12, y: pivot.y + (pivot.y - needle.y) * 0.12))
+                arm.move(to: tail)
                 arm.addLine(to: needle)
-                ctx.stroke(arm.applying(CGAffineTransform(translationX: 1.5, y: 2)),
-                           with: .color(.black.opacity(0.45)), style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
-                ctx.stroke(arm, with: .linearGradient(Gradient(colors: [Color(hex: 0xF0F0F0), Color(hex: 0x9C9C9C)]),
-                                                      startPoint: pivot, endPoint: needle),
+                ctx.stroke(arm.applying(CGAffineTransform(translationX: shadowOffset.width, y: shadowOffset.height)),
+                           with: .color(.black.opacity(shadowAlpha)), style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
+                let raised = arm.applying(CGAffineTransform(translationX: 0, y: lift))
+                ctx.stroke(raised, with: .linearGradient(Gradient(colors: [Color(hex: 0xF2F2F2), Color(hex: 0x9C9C9C)]),
+                                                         startPoint: pivot, endPoint: needle),
                            style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                // 配重：唱臂尾端的圓柱
+                ctx.fill(Path(ellipseIn: circleRect(CGPoint(x: tail.x, y: tail.y + lift), R * 0.06)),
+                         with: .radialGradient(Gradient(colors: [Color(hex: 0xDADADA), Color(hex: 0x555555)]),
+                                               center: CGPoint(x: tail.x - R * 0.02, y: tail.y - R * 0.02),
+                                               startRadius: 0, endRadius: R * 0.07))
                 // 唱頭
                 let angle = atan2(Double(needle.y - pivot.y), Double(needle.x - pivot.x))
-                let head = Path(roundedRect: CGRect(x: -R * 0.06, y: -R * 0.035, width: R * 0.12, height: R * 0.07),
+                let head = Path(roundedRect: CGRect(x: -R * 0.065, y: -R * 0.038, width: R * 0.13, height: R * 0.076),
                                 cornerRadius: 1.5)
                     .applying(CGAffineTransform(rotationAngle: angle))
-                    .applying(CGAffineTransform(translationX: needle.x, y: needle.y))
+                    .applying(CGAffineTransform(translationX: needle.x, y: needle.y + lift))
                 ctx.fill(head, with: .color(Color(hex: 0xD8D8D8)))
+                // 升降桿：支點旁的小柱
+                ctx.fill(Path(roundedRect: CGRect(x: pivot.x - R * 0.2, y: pivot.y + R * 0.1,
+                                                  width: R * 0.05, height: R * 0.12), cornerRadius: 1),
+                         with: .color(Color(hex: 0x8A8A8A)))
                 // 支點
                 ctx.fill(Path(ellipseIn: circleRect(pivot, R * 0.09)), with: .radialGradient(
                     Gradient(colors: [Color(hex: 0xF4F4F4), Color(hex: 0x7A7A7A)]),
                     center: CGPoint(x: pivot.x - R * 0.03, y: pivot.y - R * 0.03), startRadius: 0, endRadius: R * 0.1))
             }
 
-            // 數字在中心孔上方、小字在下方，中心孔留在兩者之間，不會壓到冒號
-            Text(c.clock)
-                .font(.system(size: labelR * 0.44, weight: .bold, design: .rounded).monospacedDigit())
-                .foregroundStyle(Self.paper)
-                .minimumScaleFactor(0.6)
-                .lineLimit(1)
-                .frame(width: labelR * 1.7)
-                .position(x: center.x, y: center.y - labelR * 0.36)
-            Text(c.eyebrow)
-                .font(.system(size: max(7, labelR * 0.2), weight: .semibold))
-                .tracking(1)
-                .foregroundStyle(Self.paper.opacity(0.75))
-                .position(x: center.x, y: center.y + labelR * 0.42)
+            // 時間膠囊：不轉。中心在圓心下方 0.65R，高 0.36R（0.47R～0.83R），
+            // 在標籤（0.40R）之外、圓形輪廓之內；唱針最內圈在右側約 0.44R 處，碰不到它
+            VStack(spacing: 2) {
+                Text(c.clock)
+                    .font(.system(size: R * 0.19, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(Color(hex: 0xF6EBDD))
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                StatusLine(c: c, dot: 3.5)
+            }
+            .frame(width: R * 0.9, height: R * 0.36)
+            .background(Capsule().fill(Color.black.opacity(0.55)))
+            .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.6))
+            .position(x: center.x, y: center.y + R * 0.65)
         }
         .frame(width: w, height: h)
     }

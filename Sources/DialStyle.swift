@@ -40,7 +40,7 @@ enum DialStyle: String, CaseIterable, Identifiable {
         case .minimal:   return "一道圓環，末端一顆圓鈕"
         case .station:   return "紅弧是剩下的時間，紅秒針一秒一跳"
         case .candle:    return "蠟燭慢慢燒短，燭淚往下流"
-        case .vinyl:     return "唱臂從外圈往內走到結尾"
+        case .vinyl:     return "計時中唱片會轉，歌名是你的任務"
         case .nixie:     return "玻璃管裡的橘色發光數字"
         }
     }
