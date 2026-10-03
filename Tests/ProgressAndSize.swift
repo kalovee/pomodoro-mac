@@ -30,6 +30,14 @@ struct ProgressAndSizeTests {
             print("PASS: \(label)")
             fflush(stdout)
         }
+        // Hosted Intel machines may render a newly expanded SwiftUI tree more slowly.
+        // Wait for the actual state, bounded to three seconds, not a guessed sleep.
+        func settle(_ condition: () -> Bool) async {
+            let deadline = Date().addingTimeInterval(3)
+            while !condition() && Date() < deadline {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
 
         let model = PomodoroModel(prefs: prefs)
         check(model.pendingRecovery == nil, "fresh install has no recovery prompt")
@@ -137,8 +145,9 @@ struct ProgressAndSizeTests {
               "scaled compact panel drag follows mouse without resetting")
         check(!controller.model.running, "drag does not trigger start button")
         prefs.compact = false
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        check(p.frame.size == Metrics.full && !p.compactDragEnabled, "full mode retains original dimensions")
+        await settle { p.frame.size == Metrics.full && !p.compactDragEnabled }
+        check(p.frame.size == Metrics.full && !p.compactDragEnabled,
+              "full mode retains original dimensions (actual \(p.frame.size), expected \(Metrics.full), drag \(p.compactDragEnabled))")
 
         // Exercise the actual startup sheet and choose Restore Paused.
         seed(ProgressSnapshot(mode: .pomodoro, phase: .work, round: 1,
@@ -146,7 +155,7 @@ struct ProgressAndSizeTests {
         prefs.compact = true
         let recoveryPanel = PanelController(prefs: prefs)
         defer { recoveryPanel.panel.orderOut(nil) }
-        try? await Task.sleep(nanoseconds: 600_000_000)
+        await settle { recoveryPanel.panel.attachedSheet != nil && recoveryPanel.panel.frame.size == Metrics.full }
         check(recoveryPanel.panel.attachedSheet != nil, "startup presents recovery sheet")
         check(recoveryPanel.panel.frame.size == Metrics.full,
               "compact startup expands temporarily so recovery controls fit")
@@ -154,7 +163,7 @@ struct ProgressAndSizeTests {
             capture(sheet, "recovery")
             recoveryPanel.panel.endSheet(sheet, returnCode: .alertSecondButtonReturn)
         }
-        try? await Task.sleep(nanoseconds: 500_000_000)
+        await settle { recoveryPanel.model.pendingRecovery == nil && recoveryPanel.panel.frame.size == prefs.compactWindowSize }
         check(recoveryPanel.model.pendingRecovery == nil && recoveryPanel.model.remaining == 567
               && recoveryPanel.model.task == "重開測試" && !recoveryPanel.model.running,
               "startup sheet restores paused progress correctly")
