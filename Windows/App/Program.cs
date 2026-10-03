@@ -29,13 +29,22 @@ internal static class Program
             var model = new TimerEngine(new StateStore(directory));
             var main = new MainWindow(model);
             app.MainWindow = main;
+            var startupHandled = false;
             if (smoke)
                 main.ContentRendered += async (_, _) =>
                 {
+                    // WPF raises ContentRendered again when compact/full content is replaced.
+                    if (startupHandled) return;
+                    startupHandled = true;
                     try { await SmokeTests.Run(main, directory); app.Shutdown(0); }
                     catch (Exception e) { File.WriteAllText(Path.Combine(directory, "smoke-failed.txt"), e.ToString()); app.Shutdown(1); }
                 };
-            else main.ContentRendered += (_, _) => main.OfferRecovery();
+            else main.ContentRendered += (_, _) =>
+            {
+                if (startupHandled) return;
+                startupHandled = true;
+                main.OfferRecovery();
+            };
             return app.Run(main);
         }
     }

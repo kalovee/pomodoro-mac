@@ -288,6 +288,10 @@ final class PanelController: NSObject {
         if panel.styleMask != style {
             panel.styleMask = style
         }
+        // A compact dial can be narrower than AppKit's default titled-window minimum.
+        // Clear inherited constraints after changing the style, including on macOS 26.
+        panel.minSize = .zero
+        panel.contentMinSize = .zero
 
         if !compact {
             panel.titlebarAppearsTransparent = true

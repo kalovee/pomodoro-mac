@@ -28,6 +28,7 @@ struct ProgressAndSizeTests {
             guard ok else { fatalError("FAIL: \(label)") }
             checks += 1
             print("PASS: \(label)")
+            fflush(stdout)
         }
 
         let model = PomodoroModel(prefs: prefs)
@@ -104,8 +105,12 @@ struct ProgressAndSizeTests {
                 prefs.dialStyle = style
                 prefs.compactSize = size
                 try? await Task.sleep(nanoseconds: 420_000_000)
+                let deadline = Date().addingTimeInterval(3)
+                while controller.panel.frame.size != prefs.compactWindowSize && Date() < deadline {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
                 check(controller.panel.frame.size == prefs.compactWindowSize,
-                      "\(style.rawValue) / \(size.rawValue) panel fits scaled content")
+                      "\(style.rawValue) / \(size.rawValue) panel fits scaled content (actual \(controller.panel.frame.size), expected \(prefs.compactWindowSize), minimum \(controller.panel.minSize))")
                 check(controller.panel.level == .statusBar && controller.panel.compactDragEnabled,
                       "\(style.rawValue) / \(size.rawValue) retains floating and drag")
                 if style == .classic || (style == .flip && size == .small)
