@@ -1,21 +1,130 @@
-# 每次 push 都在 macOS 上跑一次 build.sh。
-# 開發時常常在沒有 Swift 編譯器的環境改程式碼，這裡是第一道真的編譯過的檢查。
-# 介面用了 Liquid Glass，需要 macOS 26 的 SDK。
 name: Build
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: macos-26
+  mac:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - name: 工具版本
+      - uses: actions/checkout@v5
+      - name: Version
+        shell: bash
         run: |
-          sw_vers
-          xcrun swiftc --version
-      - name: 編譯 番茄鐘.app
-        # 輸出到暫存資料夾，不在工作目錄留下 .app
-        run: ./build.sh "$RUNNER_TEMP"
+          version=1.0.0
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then version="${GITHUB_REF_NAME#v}"; fi
+          echo "BUILD_VERSION=$version" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+      - name: Build and validate app
+        run: |
+          ./build.sh "$RUNNER_TEMP/package"
+          codesign --verify --deep --strict "$RUNNER_TEMP/package/番茄鐘.app"
+          binary="$RUNNER_TEMP/package/番茄鐘.app/Contents/MacOS/番茄鐘"
+          xcrun vtool -show-build "$binary"
+          expected=arm64
+          if [[ "${{ matrix.arch }}" == x64 ]]; then expected=x86_64; fi
+          [[ "$(lipo -archs "$binary")" == "$expected" ]]
+          xcrun vtool -show-build "$binary" | grep -Eq 'minos[[:space:]]+26\.0'
+      - name: Native regression tests (isolated preferences)
+        run: bash Tests/run-mac.sh
+      - name: Package
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/package/番茄鐘.app" "dist/Pomodoro-v${BUILD_VERSION}-macOS-${{ matrix.arch }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-macOS-${{ matrix.arch }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Version
+        shell: pwsh
+        run: |
+          $version = '1.0.0'
+          if ($env:GITHUB_REF.StartsWith('refs/tags/v')) { $version = $env:GITHUB_REF_NAME.Substring(1) }
+          "BUILD_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Core regression tests
+        run: dotnet run --project Windows/Tests -c Release
+      - name: Publish standalone executable
+        run: dotnet publish Windows/App -c Release -r win-x64 --self-contained true -p:Version=$env:BUILD_VERSION -o "$env:RUNNER_TEMP/package"
+      - name: Published executable native UI smoke tests
+        shell: pwsh
+        run: |
+          $data = Join-Path $env:RUNNER_TEMP 'pomodoro-smoke'
+          New-Item -ItemType Directory -Path $data | Out-Null
+          $exe = Join-Path $env:RUNNER_TEMP 'package/Pomodoro.exe'
+          $process = Start-Process -FilePath $exe -ArgumentList @('--smoke-test', '--data-dir', "`"$data`"") -PassThru
+          if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'UI smoke test timed out' }
+          if ($process.ExitCode -ne 0) {
+            Get-ChildItem $data -Filter '*.txt' | ForEach-Object { Get-Content $_.FullName }
+            throw "UI smoke test exit code $($process.ExitCode)"
+          }
+          Get-Content (Join-Path $data 'smoke-results.txt')
+      - name: Package only distributable files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item LICENSE "$env:RUNNER_TEMP/package/LICENSE.txt"
+          Copy-Item Windows/README.md "$env:RUNNER_TEMP/package/README.txt"
+          Compress-Archive -Path "$env:RUNNER_TEMP/package/*" -DestinationPath "dist/Pomodoro-v$env:BUILD_VERSION-Windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-ui-verification
+          path: ${{ runner.temp }}/pomodoro-smoke/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-Windows-x64
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release-draft:
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: [mac, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+      - name: Verify expected assets and create draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for platform in macOS-arm64 macOS-x64 Windows-x64; do
+            test -s "dist/Pomodoro-v${version}-${platform}.zip"
+          done
+          (cd dist && sha256sum *.zip > SHA256SUMS.txt)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to overwrite its attachments.' >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS.txt \
+            --verify-tag --draft --title "Pomodoro ${GITHUB_REF_NAME} — macOS & Windows" \
+            --notes-file RELEASE_NOTES.md

@@ -9,6 +9,12 @@ BUNDLE_ID="local.pomodoro.timer"
 OUT="${1:-$PWD}"                 # 第一個參數可指定輸出資料夾，預設是專案目錄
 APP="$OUT/$APP_NAME.app"
 BUILD=".build"
+VERSION="${BUILD_VERSION:-1.0.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-1}"
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ ! "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
+    echo "Invalid BUILD_VERSION or BUILD_NUMBER" >&2
+    exit 1
+fi
 
 echo "▸ 清理"
 rm -rf "$APP" "$BUILD"
@@ -37,8 +43,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
+    <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
     <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSHumanReadableCopyright</key><string></string>

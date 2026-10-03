@@ -9,3 +9,9 @@
 # 探針／暫存
 *.o
 *.swiftmodule
+
+# Windows / .NET and release artifacts
+**/bin/
+**/obj/
+dist/
+TestResults/

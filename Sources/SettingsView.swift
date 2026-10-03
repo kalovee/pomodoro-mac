@@ -71,6 +71,16 @@ struct SettingsView: View {
     /// 外觀：錶盤風格
     @ViewBuilder
     private var appearanceTab: some View {
+        group("縮小尺寸") {
+            Picker("尺寸", selection: $prefs.compactSize) {
+                ForEach(CompactSize.allCases) { size in
+                    Text(size.label).tag(size)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            caption("小 80% · 中 100% · 大 125%。所有錶盤保留原本比例；縮小時也能按右鍵調整。")
+        }
         group("風格") {
             styleGallery
         }

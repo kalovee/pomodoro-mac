@@ -1,4 +1,43 @@
-# 🍅 番茄鐘 — Pomodoro Timer for macOS
+# 🍅 番茄鐘 — Pomodoro Timer for macOS & Windows
+
+## Download / 直接下載
+
+[Latest release / 最新下載版](https://github.com/kalovee/pomodoro-mac/releases/latest)
+
+| 電腦 | 下載檔案 | 系統要求 |
+|---|---|---|
+| Apple Silicon Mac（M 系列） | `Pomodoro-v1.0.0-macOS-arm64.zip` | macOS 26 以上 |
+| Intel Mac | `Pomodoro-v1.0.0-macOS-x64.zip` | macOS 26 以上 |
+| Windows PC | `Pomodoro-v1.0.0-Windows-x64.zip` | Windows 11 x64 |
+
+下載的是 App，不必自己編譯。Mac 解壓後把 `番茄鐘.app` 搬到 Applications；
+Windows 解壓後執行 `Pomodoro.exe`，不必另裝 .NET。
+Release 的 `SHA256SUMS.txt` 可核對檔案；GitHub 自動附的 Source code ZIP/TAR 是原始碼，不能直接開啟。
+
+**首次開啟可能有安全提示**：Mac 版使用 ad-hoc 簽章，尚未 Developer ID 簽章／公證；
+Windows 版尚未 Authenticode 簽章。只從本專案 Release 下載、確認來源及校驗碼後：
+Mac 可從「系統設定 → 隱私權與安全性 → 強制打開」放行；
+Windows 可使用「其他資訊 → 仍要執行」（若管理政策允許）。
+不必關閉 Gatekeeper、SmartScreen 或 Defender；遇到學校／公司的管制請遵守其政策。
+
+### Platform differences / 平台差異
+
+- **Mac 完整版**：十三種錶盤、三種計時模式、紀錄／統計、全域快捷鍵、提醒與休息遮罩，
+  支援進度恢復及三種縮小尺寸。
+- **Windows 實用版**：經典錶盤、三種計時模式、可調時長、自動接續、任務、紀錄／今日統計、
+  聲音／持續視覺提醒、可拖曳的置頂縮小視窗、進度恢復與三種尺寸。
+  不含另外十二種錶盤、進階週統計、休息遮罩及全域快捷鍵；詳見 [Windows 使用說明](Windows/README.md)。
+- 兩個平台各自保存資料，沒有跨裝置同步。下載包不包含作者的私人設定或讀書紀錄。
+
+### Verification / 驗證範圍
+
+GitHub Actions 在 Apple Silicon／Intel macOS 26 與 Windows Server 2025 分別建置。
+Mac 原生測試使用獨立偏好資料，涵蓋十三種錶盤的三種尺寸、恢復與模擬拖曳；
+Windows 有獨立計時核心測試，並從打包後的 `.exe` 測 WPF 輸入、按鈕、尺寸、模擬 DPI 拖曳和設定捲動。
+這不等同於每種電腦上的實體滑鼠測試；Windows 11 x64 是目標，ARM／舊 Windows 不列入驗收，
+不保證浮在獨佔全螢幕遊戲或系統安全桌面上。
+
+## Native Mac app
 
 A native macOS pomodoro timer (SwiftUI + AppKit) that shrinks to a floating dial
 and stays visible **over other apps in full screen** — built for studying with a
@@ -20,7 +59,8 @@ PDF or a book filling the display.
 
 Builds with **Xcode Command Line Tools only** — no Xcode needed: `./build.sh`
 
-Every push is compiled on macOS by GitHub Actions (`.github/workflows/build.yml`).
+Every push is built and tested on macOS (Apple Silicon + Intel) and Windows by GitHub Actions.
+Version tags create a draft release after all checks pass.
 
 > The rest of this README is in Traditional Chinese. Beyond usage, it documents the
 > non-obvious macOS pitfalls this app hit — AppKit not counting `NSPanel`s as windows,
@@ -32,9 +72,9 @@ Every push is compiled on macOS by GitHub Actions (`.github/workflows/build.yml`
 
 一個原生的 macOS 番茄鐘（SwiftUI）。
 
-## 安裝
+## 自行編譯 Mac 版（選用）
 
-只要三步，**全程不會跳任何安全警告**——自己編譯出來的 App 不會被系統隔離。
+若不使用上面的下載版，也可自行編譯：
 
 1. 裝 Xcode Command Line Tools（如果還沒有）。開「終端機」貼上：
 
@@ -58,21 +98,23 @@ Every push is compiled on macOS by GitHub Actions (`.github/workflows/build.yml`
 
 需要 **macOS 26 以上**：介面用了 Liquid Glass（`glassEffect` 等 macOS 26 才有的 API）。
 
-> **macOS 14–15 的 Mac**：請用改成 Liquid Glass 之前的最後一版，功能相同（十三種錶盤、三種計時模式、紀錄統計），只是介面是舊的扁平樣式：
+> **macOS 14–15 的 Mac**：可自行編譯 Liquid Glass 之前的歷史版本，保留十三種錶盤、三種計時模式和紀錄統計，
+> 但不含此次新增的進度恢復與尺寸調整；這次 Release 不另外提供舊系統下載包：
 >
 > ```bash
 > git clone https://github.com/kalovee/pomodoro-mac.git && cd pomodoro-mac && git checkout macos14-last && ./build.sh
 > ```
 
-> **為什麼不直接提供 .app 下載？**
-> 這個 App 是 ad-hoc 簽章，沒有 Apple 的 Developer ID，也沒有經過公證。
-> 透過 AirDrop、雲端或 email 傳過去的檔案會被標上隔離屬性，Gatekeeper 會擋下來，
-> 收到的人得自己去「系統設定 → 隱私權與安全性」手動放行。
-> 要做到下載就能開、零警告，需要 Apple Developer Program（年費 99 美元）
-> 簽發的 Developer ID 憑證加上公證流程。自己編譯完全沒有這個問題。
+開發驗證：`bash Tests/run-mac.sh`。發布版本可用 `BUILD_VERSION=1.0.0 BUILD_NUMBER=1 ./build.sh`；
+App 識別碼仍為 `local.pomodoro.timer`，更新不另建一份偏好設定或紀錄。
 
 ## 功能
 
+- **重開後恢復進度**：未完成的計時、任務名稱、階段與輪數會保存。重開時可選「繼續計時」、
+  「恢復並暫停」或「重新開始」。關閉期間不計時，恢復不會補記完成紀錄；番茄鐘、倒數與碼錶皆支援。
+  操作時與正常結束 App 時保存，計時中每 10 秒保存一次；突然當機最多可能少掉最後約 10 秒的進度。
+- **縮小尺寸小／中／大**：設定 → 外觀，或縮小錶盤右鍵 → 尺寸。分別為原尺寸的 80%、100%、125%，
+  十三種錶盤皆維持比例，完整視窗大小不變。
 - **十三種錶盤風格**（詳見下方「錶盤風格」）：經典刻度、像素、翻頁鐘、LCD 電子錶、沙漏、月相、
   水位、包浩斯、極簡環、車站鐘、蠟燭、黑膠唱片、輝光管。設定最上方有縮圖牆可以點選，縮小模式按右鍵 →「風格」也能換。
   縮小模式的**形狀跟著風格走**：像素是方的、翻頁鐘和 LCD 是寬的、沙漏是高的

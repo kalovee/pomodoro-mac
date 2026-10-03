@@ -149,8 +149,11 @@ final class PanelController: NSObject {
     /// 探針用：目前掛著的遮罩視窗
     var overlayPanels: [NSWindow] { overlay?.visiblePanels ?? [] }
 
-    override init() {
-        let prefs = Prefs()
+    override convenience init() {
+        self.init(prefs: Prefs())
+    }
+
+    init(prefs: Prefs) {
         self.prefs = prefs
         self.model = PomodoroModel(prefs: prefs)
 
@@ -198,6 +201,38 @@ final class PanelController: NSObject {
         panel.orderFront(nil)
         // 啟動時 SwiftUI 還沒畫任何東西，第一次算出的陰影是空的
         invalidateShadowSoon()
+        if model.pendingRecovery != nil {
+            // Wait until launch and SwiftUI layout have finished before presenting a sheet.
+            DispatchQueue.main.async { [weak self] in self?.offerRecovery() }
+        }
+    }
+
+    private func offerRecovery() {
+        guard let saved = model.pendingRecovery else { return }
+        let wasCompact = prefs.compact
+        applyMode(false, animated: false)
+        let alert = NSAlert()
+        alert.messageText = "繼續上次的計時嗎？"
+        let seconds = Int(saved.mode == .stopwatch ? saved.elapsed : saved.remaining)
+        let clock = String(format: "%02d:%02d", seconds / 60, seconds % 60)
+        let label = saved.task.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = label.isEmpty ? "未命名任務" : label
+        let duration = saved.mode == .stopwatch ? "已累積 \(clock)" : "剩餘 \(clock)"
+        alert.informativeText = "\(name) · \(saved.mode.label) · \(saved.phase.title)\n\(duration)\n\n關閉 App 期間不計時，恢復不會新增完成紀錄。"
+        alert.addButton(withTitle: "繼續計時")
+        alert.addButton(withTitle: "恢復並暫停")
+        alert.addButton(withTitle: "重新開始")
+        alert.beginSheetModal(for: panel) { [weak self] response in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                switch response {
+                case .alertFirstButtonReturn: self.model.recoverProgress(startImmediately: true)
+                case .alertSecondButtonReturn: self.model.recoverProgress(startImmediately: false)
+                default: self.model.discardRecovery()
+                }
+                self.applyMode(wasCompact, animated: false)
+            }
+        }
     }
 
     // MARK: 熱鍵
@@ -205,7 +240,7 @@ final class PanelController: NSObject {
     private func wireKeys() {
         // 視窗自己有焦點時：不用按修飾鍵
         panel.onKey = { [weak self] event in
-            guard let self else { return false }
+            guard let self, self.model.pendingRecovery == nil else { return false }
             let bare = event.modifierFlags
                 .intersection(.deviceIndependentFlagsMask)
                 .isDisjoint(with: [.command, .option, .control, .shift])
@@ -227,7 +262,7 @@ final class PanelController: NSObject {
 
         // 全域熱鍵：焦點在別的 App 上也有效
         Hotkeys.shared.onAction = { [weak self] action in
-            guard let self else { return }
+            guard let self, self.model.pendingRecovery == nil else { return }
             switch action {
             case .toggle: self.model.toggle()
             case .reset:  self.model.reset()
@@ -276,7 +311,7 @@ final class PanelController: NSObject {
         panel.isMovableByWindowBackground = !compact
         reassert()
 
-        let size = compact ? prefs.dialStyle.compactSize : Metrics.full
+        let size = compact ? prefs.compactWindowSize : Metrics.full
         let now = panel.frame
         // 以目前的中心為軸心收放，使用者把視窗拖到哪就在哪縮放
         let target = NSRect(x: (now.midX - size.width / 2).rounded(),
@@ -351,6 +386,14 @@ final class PanelController: NSObject {
             }
             .store(in: &bag)
 
+        prefs.$compactSize.dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, self.prefs.compact else { return }
+                self.applyMode(true, animated: true)
+            }
+            .store(in: &bag)
+
         prefs.$compact.dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] compact in
@@ -416,11 +459,11 @@ final class PanelController: NSObject {
     }
 
     private func saveOrigin() {
-        UserDefaults.standard.set(NSStringFromPoint(panel.frame.origin), forKey: "panelOrigin")
+        prefs.storage.set(NSStringFromPoint(panel.frame.origin), forKey: "panelOrigin")
     }
 
     private func restoreOrigin() {
-        guard let saved = UserDefaults.standard.string(forKey: "panelOrigin") else {
+        guard let saved = prefs.storage.string(forKey: "panelOrigin") else {
             panel.center()
             return
         }

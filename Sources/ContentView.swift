@@ -41,7 +41,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            if prefs.compact {
+            if prefs.compact && model.pendingRecovery == nil {
                 CompactView().transition(.opacity)
             } else {
                 FullView().transition(.opacity)
@@ -50,7 +50,7 @@ struct ContentView: View {
         // 視窗會比內容高出一個標題列，底色鋪滿整個視窗才不會出現接縫
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
-            if prefs.compact { Color.clear } else { GlowBackdrop(tint: Theme.accent(model.phase)) }
+            if prefs.compact && model.pendingRecovery == nil { Color.clear } else { GlowBackdrop(tint: Theme.accent(model.phase)) }
         }
         .clipped()
         // 必須放在 .clipped() 之後：SwiftUI 會為標題列留一塊安全區，
@@ -450,10 +450,11 @@ private struct CompactView: View {
     private var tint: Color { Theme.accent(model.phase) }
     private var style: DialStyle { prefs.dialStyle }
     /// 視窗尺寸——形狀跟著風格走
-    private var size: CGSize { style.compactSize }
+    private var size: CGSize { prefs.compactWindowSize }
+    private var baseSize: CGSize { style.compactSize }
     /// 輪廓尺寸：視窗往內縮一圈，讓輪廓的抗鋸齒邊不會被視窗邊界切平
     private var panel: CGSize {
-        CGSize(width: size.width - 2 * DialStyle.inset, height: size.height - 2 * DialStyle.inset)
+        CGSize(width: baseSize.width - 2 * DialStyle.inset, height: baseSize.height - 2 * DialStyle.inset)
     }
 
     var body: some View {
@@ -502,6 +503,8 @@ private struct CompactView: View {
         // 只有輪廓裡面算數：透明的角落點下去要能穿到後面的 App
         .contentShape(style.silhouette)
         .padding(DialStyle.inset)
+        .frame(width: baseSize.width, height: baseSize.height)
+        .scaleEffect(prefs.compactSize.scale)
         .frame(width: size.width, height: size.height)
         .animation(.easeOut(duration: 0.18), value: ui.hovering)
         .animation(.easeInOut(duration: 0.28), value: model.phase)
@@ -553,6 +556,15 @@ private struct CompactView: View {
                         prefs.dialStyle = style
                     } label: {
                         Text(prefs.dialStyle == style ? "✓ \(style.label)" : style.label)
+                    }
+                }
+            }
+            Menu("尺寸") {
+                ForEach(CompactSize.allCases) { size in
+                    Button {
+                        prefs.compactSize = size
+                    } label: {
+                        Text(prefs.compactSize == size ? "✓ \(size.label)" : size.label)
                     }
                 }
             }

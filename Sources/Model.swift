@@ -102,7 +102,7 @@ struct Preset: Identifiable, Equatable {
 
 /// 番茄鐘之外的兩種用法。煮麵、小考要的是「設一個時間、到了叫我」；
 /// 一段不知道會多長的專注，要的是從零往上數。
-enum TimerMode: String, CaseIterable, Identifiable {
+enum TimerMode: String, Codable, CaseIterable, Identifiable {
     case pomodoro, countdown, stopwatch
     var id: String { rawValue }
 
@@ -150,8 +150,32 @@ enum OverlayMode: String, CaseIterable, Identifiable {
 
 // MARK: - 偏好設定
 
+enum CompactSize: String, CaseIterable, Identifiable {
+    case small, medium, large
+    var id: String { rawValue }
+    var label: String {
+        switch self { case .small: return "小"; case .medium: return "中"; case .large: return "大" }
+    }
+    var scale: CGFloat {
+        switch self { case .small: return 0.8; case .medium: return 1; case .large: return 1.25 }
+    }
+}
+
+/// Freeze progress while the app is closed. Never replay completed sessions on recovery.
+struct ProgressSnapshot: Codable {
+    var version = 1
+    let mode: TimerMode
+    let phase: Phase
+    let round: Int
+    let remaining: TimeInterval
+    let elapsed: TimeInterval
+    let task: String
+    let savedAt: Date
+}
+
 final class Prefs: ObservableObject {
-    private let d = UserDefaults.standard
+    let storage: UserDefaults
+    private var d: UserDefaults { storage }
 
     @Published var workMin: Int      { didSet { d.set(workMin, forKey: "workMin") } }
     @Published var shortMin: Int     { didSet { d.set(shortMin, forKey: "shortMin") } }
@@ -162,6 +186,7 @@ final class Prefs: ObservableObject {
     @Published var alwaysOnTop: Bool { didSet { d.set(alwaysOnTop, forKey: "alwaysOnTop") } }
     @Published var autoContinue: Bool { didSet { d.set(autoContinue, forKey: "autoContinue") } }
     @Published var compact: Bool     { didSet { d.set(compact, forKey: "compact") } }
+    @Published var compactSize: CompactSize { didSet { d.set(compactSize.rawValue, forKey: "compactSize") } }
     @Published var hideDock: Bool    { didSet { d.set(hideDock, forKey: "hideDock") } }
     @Published var idleFade: Bool    { didSet { d.set(idleFade, forKey: "idleFade") } }
 
@@ -184,7 +209,9 @@ final class Prefs: ObservableObject {
     /// 單次倒數的長度（分鐘）
     @Published var countdownMin: Int { didSet { d.set(countdownMin, forKey: "countdownMin") } }
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        storage = defaults
+        let d = defaults
         d.register(defaults: [
             "workMin": 25, "shortMin": 5, "longMin": 15,
             "roundsPerLong": 4, "soundOn": true, "notifyOn": true,
@@ -207,6 +234,7 @@ final class Prefs: ObservableObject {
         alwaysOnTop = d.bool(forKey: "alwaysOnTop")
         autoContinue = d.bool(forKey: "autoContinue")
         compact = d.bool(forKey: "compact")
+        compactSize = CompactSize(rawValue: d.string(forKey: "compactSize") ?? "") ?? .medium
         hideDock = d.bool(forKey: "hideDock")
         idleFade = d.bool(forKey: "idleFade")
 
@@ -232,6 +260,11 @@ final class Prefs: ObservableObject {
         case .shortBreak: return shortMin
         case .longBreak: return longMin
         }
+    }
+
+    var compactWindowSize: CGSize {
+        CGSize(width: (dialStyle.compactSize.width * compactSize.scale).rounded(),
+               height: (dialStyle.compactSize.height * compactSize.scale).rounded())
     }
 
     /// 目前的設定剛好等於哪一組預設；都不符合就是自訂
@@ -274,7 +307,8 @@ final class PomodoroModel: ObservableObject {
     /// 這一組長休息週期內，已完成的專注輪數（0 ..< roundsPerLong）
     @Published private(set) var roundInCycle = 0
     @Published private(set) var history: [Session] = []
-    @Published var task = ""
+    @Published var task = "" { didSet { if !loadingProgress { saveProgress() } } }
+    @Published private(set) var pendingRecovery: ProgressSnapshot?
 
     /// 時間到了但使用者還沒表示看到。聲音有長度上限，這個沒有——
     /// 一個你沒聽到的鈴聲再長也是沒聽到，但三分鐘後還在脈動的圓盤，
@@ -318,12 +352,23 @@ final class PomodoroModel: ObservableObject {
     /// 碼錶：這次按下開始的時間，和之前累積的時間
     private var stopwatchStart: Date?
     private var stopwatchBase: TimeInterval = 0
-    private let d = UserDefaults.standard
+    private var d: UserDefaults { prefs.storage }
+    private var loadingProgress = false
+    private var lastProgressSave = Date.distantPast
+    private static let progressKey = "unfinishedProgress.v1"
 
     init(prefs: Prefs) {
         self.prefs = prefs
         loadHistory()
         remaining = total
+        if let data = d.data(forKey: Self.progressKey),
+           let saved = try? JSONDecoder().decode(ProgressSnapshot.self, from: data),
+           saved.version == 1, saved.remaining.isFinite, saved.elapsed.isFinite,
+           saved.remaining >= 0, saved.remaining <= 24 * 3600,
+           saved.elapsed >= 0, saved.elapsed <= 365 * 24 * 3600,
+           saved.round >= 0, saved.round < 100 {
+            pendingRecovery = saved
+        }
     }
 
     var mode: TimerMode { prefs.timerMode }
@@ -364,6 +409,7 @@ final class PomodoroModel: ObservableObject {
     /// 換模式。一律停下來、回到這個模式的起點，避免一段倒數跑到一半變成碼錶這種說不清的狀態。
     func setMode(_ newMode: TimerMode) {
         guard newMode != mode else { return }
+        defer { saveProgress() }
         clearAlert()
         stopTicker()
         prefs.timerMode = newMode
@@ -390,6 +436,7 @@ final class PomodoroModel: ObservableObject {
     /// 使用者什麼都沒看到，看起來就像功能沒做出來。
     private func beginCountdown() {
         guard !running else { return }
+        defer { saveProgress() }
         if mode == .stopwatch {
             stopwatchStart = Date()
             running = true
@@ -410,6 +457,7 @@ final class PomodoroModel: ObservableObject {
     }
 
     func pause() {
+        defer { saveProgress() }
         clearAlert()
         guard running else { return }
         if mode == .stopwatch {
@@ -423,6 +471,7 @@ final class PomodoroModel: ObservableObject {
 
     /// 重設目前這一段（不動輪數與今日統計）
     func reset() {
+        defer { saveProgress() }
         clearAlert()
         stopTicker()
         stopwatchBase = 0
@@ -437,6 +486,7 @@ final class PomodoroModel: ObservableObject {
 
     func skip() {
         guard canSkip else { return }
+        defer { saveProgress() }
         clearAlert()
         stopTicker()
         advance(countAsDone: false)
@@ -444,6 +494,7 @@ final class PomodoroModel: ObservableObject {
 
     /// 把輪數與今日統計歸零
     func resetCycle() {
+        defer { saveProgress() }
         clearAlert()
         stopTicker()
         phase = .work
@@ -466,6 +517,8 @@ final class PomodoroModel: ObservableObject {
     }
 
     private func tick() {
+        // At most one lightweight checkpoint every ten seconds while running.
+        defer { if Date().timeIntervalSince(lastProgressSave) >= 10 { saveProgress() } }
         if mode == .stopwatch {
             let now = currentElapsed
             // 跟倒數一樣，只在顯示的秒數變了才發佈
@@ -513,6 +566,7 @@ final class PomodoroModel: ObservableObject {
     /// 兩個動作分開，語意才不會混在一起。
     func logProgressAndBreak() {
         guard canLogProgress else { return }
+        defer { saveProgress() }
         let minutes = elapsedMinutes
         let label = task.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -656,6 +710,7 @@ final class PomodoroModel: ObservableObject {
     /// 刻意不是 private：探針要能直接觸發一段結束，
     /// 否則每個測試都得真的等完一整段時間。
     func complete() {
+        defer { saveProgress() }
         let finished = phase
         let label = task.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -785,8 +840,9 @@ final class PomodoroModel: ObservableObject {
 
     /// 使用者在設定裡改了時長：沒在跑的話就直接套用新長度
     func syncDurationIfIdle() {
-        guard !running, mode != .stopwatch else { return }
+        guard !loadingProgress, !running, mode != .stopwatch else { return }
         remaining = total
+        saveProgress()
     }
 
     /// 拖曳錶盤設定時間：番茄鐘改目前這一段的長度，倒數改倒數長度。碼錶沒有長度可設。
@@ -810,9 +866,53 @@ final class PomodoroModel: ObservableObject {
             return
         }
         remaining = total
+        saveProgress()
     }
 
     // MARK: 儲存
+
+    /// Called on actions, periodic checkpoints and clean app termination.
+    func saveProgress() {
+        guard !loadingProgress, pendingRecovery == nil else { return }
+        let left = running && mode != .stopwatch
+            ? max(0, endDate?.timeIntervalSinceNow ?? remaining) : remaining
+        let used = mode == .stopwatch ? currentElapsed : 0
+        let hasProgress = running || left < total || used > 0 || roundInCycle > 0
+            || phase != .work || !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard hasProgress else {
+            d.removeObject(forKey: Self.progressKey)
+            return
+        }
+        let saved = ProgressSnapshot(mode: mode, phase: phase, round: roundInCycle,
+                                     remaining: left, elapsed: used, task: task, savedAt: Date())
+        if let data = try? JSONEncoder().encode(saved) {
+            d.set(data, forKey: Self.progressKey)
+            lastProgressSave = Date()
+        }
+    }
+
+    func recoverProgress(startImmediately: Bool) {
+        guard let saved = pendingRecovery else { return }
+        loadingProgress = true
+        clearAlert()
+        stopTicker()
+        prefs.timerMode = saved.mode
+        phase = saved.phase
+        roundInCycle = min(saved.round, max(0, prefs.roundsPerLong - 1))
+        remaining = min(total, saved.remaining)
+        stopwatchBase = saved.elapsed
+        elapsed = saved.elapsed
+        task = saved.task
+        pendingRecovery = nil
+        segmentID += 1
+        loadingProgress = false
+        if startImmediately { start() } else { saveProgress() }
+    }
+
+    func discardRecovery() {
+        pendingRecovery = nil
+        d.removeObject(forKey: Self.progressKey)
+    }
 
     private func loadHistory() {
         guard let data = d.data(forKey: "history"),

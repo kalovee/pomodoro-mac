@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        controller?.model.saveProgress()
         Diagnostics.log("結束 App，呼叫來源：", stack: true)
     }
 
